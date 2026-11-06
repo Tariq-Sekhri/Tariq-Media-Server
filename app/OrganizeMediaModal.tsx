@@ -7,6 +7,7 @@ import { API_BASE, ancestorTags } from "./lib/media";
 import { hydratePendingOfflineChanges, queueOfflineOrganization, queueOfflinePlaylistCreate, readOfflineUserState, readPendingOfflineChanges } from "./lib/offline";
 import { applyPendingOrganization, emptyPendingChanges } from "./lib/offline-organization";
 import TagInput from "./TagInput";
+import { useBackLayer } from "./lib/back-layers";
 
 export type OrganizePlaylist = {
   id: string;
@@ -77,6 +78,7 @@ export default function OrganizeMediaModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingPlaylist, setSavingPlaylist] = useState(false);
+  useBackLayer(open, () => { if (!saving) onClose(); });
 
   useEffect(() => {
     if (!open || !path) return;
@@ -196,7 +198,7 @@ export default function OrganizeMediaModal({
         if (event.target === event.currentTarget && !saving) onClose();
       }}
     >
-      <form className="organize-media-modal" onSubmit={saveOrganization}>
+      <form className="organize-media-modal" role="dialog" aria-modal="true" aria-label={`Organize ${name}`} onSubmit={saveOrganization}>
         <div>
           <p>ORGANIZE MEDIA</p>
           <h2>{name}</h2>
@@ -254,6 +256,7 @@ export default function OrganizeMediaModal({
                     setError("");
                   }}
                   placeholder="Create a new playlist…"
+                  aria-label="Create a new playlist"
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
@@ -265,6 +268,7 @@ export default function OrganizeMediaModal({
                   type="button"
                   disabled={!inlinePlaylistName.trim() || savingPlaylist}
                   onClick={() => void createPlaylistInline()}
+                  aria-label="Create playlist"
                 >
                   ＋
                 </button>

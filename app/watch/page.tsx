@@ -1,4 +1,5 @@
 "use client";
+import { closeTopBackLayer, useBackLayer } from "../lib/back-layers";
 
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type CSSProperties, type VideoHTMLAttributes, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
@@ -2079,6 +2080,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     setMuted((value) => !value);
   };
   const popupsOpen = volumeMenuOpen || queueMenuOpen || settingsMenuOpen || qualityMenuOpen || captionMenuOpen;
+  useBackLayer(popupsOpen, closePopups);
   const handlePlaybackSurfaceClick = () => {
     if (isPhoneLayout()) {
       toggleControlsVisibility();
@@ -2863,7 +2865,10 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
       }
       // The library owns the rest of the keyboard while the video is small.
       if (watchModeRef.current !== "full") return;
-      if (event.key === "Escape" && !document.fullscreenElement) leaveToLibraryLatest();
+      if (event.key === "Escape" && !document.fullscreenElement) {
+        event.preventDefault();
+        if (!closeTopBackLayer()) leaveToLibraryLatest();
+      }
       else if (event.key === "ArrowLeft") { event.preventDefault(); seekByLatest(-10); }
       else if (event.key === "ArrowRight") { event.preventDefault(); seekByLatest(10); }
       else if (event.key === " " || event.key.toLowerCase() === "k") { event.preventDefault(); togglePlayback(); }

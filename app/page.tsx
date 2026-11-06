@@ -2319,13 +2319,6 @@ export default function Home() {
   }, [canManageLibraries, currentFolder, folderCovers, items, libraries]);
   useEffect(() => {
     if (!settingsOpen) return;
-    const modal = document.querySelector<HTMLElement>(".profile-settings-backdrop");
-    const background = modal?.parentElement ? Array.from(modal.parentElement.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== modal && !node.inert) : [];
-    background.forEach(node => { node.inert = true; });
-    return () => { background.forEach(node => { node.inert = false; }); };
-  }, [settingsOpen]);
-  useEffect(() => {
-    if (!settingsOpen) return;
     setSettingsError("");
     void authFetch(`${API_BASE}/api/profile/sessions`).then(async (response) => {
       if (!response.ok) throw new Error(`Server returned ${response.status}`);
@@ -5734,6 +5727,8 @@ export default function Home() {
   };
   const title = activeSearch.trim()
     ? "Search"
+    : section === "trash"
+      ? "Trash"
     : section === "library"
       ? "Libraries"
       : section === "playlists"
@@ -6414,12 +6409,14 @@ export default function Home() {
             <strong>TMS</strong>
           </button>
         </div>
-        <nav>
+        <nav aria-label="Main navigation">
           {nav.filter((item) => item.id === "offline" || backendState !== "offline").map((item) => (
-            <a href={`/?section=${item.id}`} key={item.id} onClick={(e) => e.preventDefault()} style={{ display: 'contents' }}>
-              <button
+            <a href={`/?section=${item.id}`} key={item.id}
                 className={section === item.id ? "active" : ""}
-                onClick={() => {
+                aria-current={section === item.id ? "page" : undefined}
+                onClick={(event) => {
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
                   const nextSection = item.id;
                   setSection(nextSection);
                   if (nextSection === "library" || nextSection === "offline") {
@@ -6433,15 +6430,12 @@ export default function Home() {
               >
                 <i>{item.icon}</i>
                 {item.label}
-              </button>
             </a>
           ))}
           {backendState !== "offline" && canOpenAdminPanel && (
-            <a href={sessionUser?.is_admin ? "/admin?section=notifications" : "/admin"} onClick={(event) => event.preventDefault()} style={{ display: "contents" }}>
-              <button onClick={() => window.location.assign(sessionUser?.is_admin ? "/admin?section=notifications" : "/admin")}>
+            <a href={sessionUser?.is_admin ? "/admin?section=notifications" : "/admin"}>
                 <i>▦</i>Admin
                 {sessionUser?.is_admin && pendingAdminNotifications > 0 && <em>{pendingAdminNotifications}</em>}
-              </button>
             </a>
           )}
         </nav>

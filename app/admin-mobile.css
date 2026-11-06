@@ -1,0 +1,155 @@
+/* Keep detailed permissions available without making account forms an endless checklist. */
+.admin-shell .admin-permission-details { margin-top: 12px; }
+.admin-shell .admin-permission-details > summary { cursor: pointer; color: #d4cafa; font-size: 14px; padding-block: 10px; }
+.admin-shell .admin-modal-backdrop { z-index: 1500; }
+
+@media (max-width: 760px) {
+  .admin-shell .admin-library-list,
+  .admin-shell .admin-library-card,
+  .admin-shell .admin-cookie-body,
+  .admin-shell .admin-cookie-controls,
+  .admin-shell .admin-cookie-extract-group,
+  .admin-shell .admin-cookie-extract-group label {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .admin-shell .admin-cookie-status-bar,
+  .admin-shell .admin-cookie-stats,
+  .admin-shell .admin-cookie-extract-inputs {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-shell .cookie-status-item { min-width: 0; }
+  .admin-shell .cookie-status-item :is(strong, small),
+  .admin-shell .admin-cookie-stats :is(strong, small) {
+    white-space: normal;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+  }
+
+  .admin-shell .admin-cookie-extract-group { flex-basis: 100%; }
+  .admin-shell .admin-cookie-extract-inputs :is(select, button) {
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    box-sizing: border-box;
+    font-size: 14px;
+  }
+  .admin-shell .admin-cookie-extract-inputs button { white-space: normal; }
+  .admin-shell .admin-cookie-manual-group { width: 100%; }
+  .admin-shell .admin-cookie-manual-group :is(button, .admin-cookie-file-upload) {
+    min-height: 48px;
+    box-sizing: border-box;
+    white-space: normal;
+    font-size: 14px;
+  }
+  .admin-shell .admin-cookies-card > header { flex-wrap: wrap; }
+  .admin-shell .admin-cookie-header-actions { width: 100%; }
+  .admin-shell .admin-cookie-header-actions > button { min-height: 48px; }
+
+  .admin-shell .admin-library-card > header span,
+  .admin-shell .admin-quota-list :is(span, p),
+  .admin-shell .admin-cookie-body :is(small, p),
+  .admin-shell .cookie-status-label,
+  .admin-shell .admin-cookie-extract-group label > span,
+  .admin-shell .admin-cookie-editor-container label > span,
+  .admin-shell .admin-ytdlp-throttle :is(label > span, small),
+  .admin-shell .admin-cookie-guide-steps {
+    font-size: 14px;
+    line-height: 1.5;
+    color: #b9c2ca;
+    letter-spacing: normal;
+  }
+  .admin-shell .cookie-status-item strong { font-size: 16px; line-height: 1.4; }
+  .admin-shell .admin-quota-list > p { margin: 0; }
+  .admin-shell .admin-cookie-guide-head { min-height: 48px; font-size: 14px; }
+
+  /* The form owns the viewport while open; background navigation stays below it. */
+  .admin-shell .admin-modal-backdrop {
+    z-index: 1500;
+    padding: 0;
+    align-items: end;
+  }
+  .admin-shell .admin-user-modal,
+  .admin-shell .admin-user-modal-wide {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    max-height: 100dvh;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    box-sizing: border-box;
+    border: 0;
+    border-radius: 0;
+    padding: 16px 16px 0;
+  }
+  .admin-shell .admin-user-modal-wide { height: 100dvh; }
+  .admin-shell .admin-user-modal-head {
+    position: sticky;
+    top: -16px;
+    z-index: 2;
+    align-items: center;
+    margin: -16px -16px 12px;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 16px 8px;
+    background: #11151a;
+    border-bottom: 1px solid #343b43;
+  }
+  .admin-shell .admin-user-modal-head p { font-size: 12px; }
+  .admin-shell .admin-user-modal-head > button {
+    flex: 0 0 48px;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
+    color: #c4ccd2;
+  }
+  .admin-shell .admin-user-modal > label { font-size: 14px; }
+  .admin-shell .admin-user-modal :is(input:not([type=checkbox]), select) {
+    min-height: 48px;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    font-size: 16px;
+  }
+  .admin-shell .admin-user-modal :is(p, small),
+  .admin-shell .admin-account-permissions > header > div:first-child {
+    color: #b9c2ca;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .admin-shell .admin-checkbox-field { min-height: 48px; }
+  .admin-shell .admin-user-modal .admin-checkbox-field input {
+    width: 24px;
+    height: 24px;
+    margin: 12px 0;
+  }
+  .admin-shell .admin-account-permissions { padding: 12px; }
+  .admin-shell .admin-permission-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .admin-shell .admin-permission-presets button {
+    min-height: 48px;
+    font-size: 14px;
+    white-space: normal;
+  }
+  .admin-shell .admin-permission-details > summary { min-height: 48px; box-sizing: border-box; }
+  .admin-shell .admin-user-modal-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin: 16px -16px 0;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid #343b43;
+    background: #11151a;
+  }
+  .admin-shell .admin-user-modal-actions button {
+    flex: 1 1 0;
+    min-width: 48px;
+    min-height: 48px;
+    font-size: 14px;
+  }
+  .admin-shell .admin-session-list { margin-inline: -16px; margin-bottom: 0; }
+}

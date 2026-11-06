@@ -11,6 +11,7 @@ import MobileNavigation from "../MobileNavigation";
 import { mainNavigation } from "../lib/navigation";
 import { RequestsPanel } from "../discover/Requests";
 import "../discover/style.css";
+import "../admin-mobile.css";
 import { useBackLayer } from "../lib/back-layers";
 
 type LogsResponse = { files: string[]; lines: string[]; actors: string[]; total_events: number; stored_events: number; total_bytes: number };
@@ -466,7 +467,7 @@ export default function AdminDashboard() {
       const [metricsLogsResponse, processesResponse, usersResponse, librariesResponse, locationsResponse, downloadsResponse] = await Promise.all([
         section === "metrics" && canViewLogs ? authFetch(`${API_BASE}/api/admin/performance`) : null,
         section === "processes" && canViewProcesses ? authFetch(`${API_BASE}/api/admin/processes`, { signal: AbortSignal.timeout(12_000) }) : null,
-        section === "users" && needsUsers ? authFetch(`${API_BASE}/api/admin/users`) : null,
+        (section === "users" || section === "downloads") && needsUsers ? authFetch(`${API_BASE}/api/admin/users`) : null,
         (section === "libraries" || section === "locations") && canManageLibraries ? authFetch(`${API_BASE}/api/libraries`) : null,
         section === "locations" && canManageLibraries ? authFetch(`${API_BASE}/api/admin/library-locations`) : null,
         section === "downloads" && canManageDownloads ? authFetch(`${API_BASE}/api/admin/downloads`) : null,
@@ -805,6 +806,11 @@ export default function AdminDashboard() {
     setShowAddLocation(false);
     setFolderBrowser(null);
   };
+  useBackLayer(showCreateLibrary, closeCreateLibrary);
+  useBackLayer(showAddLocation, closeAddLocation);
+  useBackLayer(showAddUser, closeAddUser);
+  useBackLayer(Boolean(editingUser), () => { if (!savingUser && !deletingUser) setEditingUser(null); });
+  useBackLayer(Boolean(sessionUser), () => { if (!revokingSession) setSessionUser(null); });
   const createLibraryLocation = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!locationName.trim() || !locationPath.trim() || creatingLocation) return;
@@ -1142,12 +1148,15 @@ export default function AdminDashboard() {
         <button type="button" onClick={() => setter(emptyAdminPermissions())}>Clear</button>
       </div>
     </header>
-    <div className="admin-account-permission-grid">
+    <details className="admin-permission-details">
+      <summary>Individual permissions</summary>
+      <div className="admin-account-permission-grid">
       {accountPermissions.map((permission) => <label key={permission.key} className={`admin-checkbox-field ${permission.key === "access_admin_panel" ? "admin-panel-master-permission" : ""}`}>
         <input type="checkbox" checked={permissions[permission.key]} onChange={(event) => setPermission(setter, permission.key, event.target.checked)} />
         <span><b>{permission.label}</b><small>{permission.description}</small></span>
       </label>)}
-    </div>
+      </div>
+    </details>
   </section>;
   return <main className="admin-shell">
     <MobileNavigation active="admin" admin={true} />
@@ -1773,7 +1782,7 @@ export default function AdminDashboard() {
       {section === "downloads" && <div className="admin-library-list">
         <article className="admin-surface admin-library-card">
           <header><div><p>QUOTA OVERVIEW</p><h2>Per-user server storage</h2><span>Committed media and Trash count as used; active uploads and downloads are reserved.</span></div></header>
-          <div className="admin-quota-list">{users.map((user) => <div key={user.id}><div><b>{user.name}</b><span>{formatBytes(user.used_bytes)} used · {formatBytes(user.reserved_bytes)} reserved · {formatBytes(user.storage_quota_bytes)}</span></div><progress max={Math.max(1, user.storage_quota_bytes ?? Math.max(1, user.used_bytes + user.reserved_bytes))} value={user.used_bytes + user.reserved_bytes} /></div>)}</div>
+          <div className="admin-quota-list">{users.length ? users.map((user) => <div key={user.id}><div><b>{user.name}</b><span>{formatBytes(user.used_bytes)} used · {formatBytes(user.reserved_bytes)} reserved · {formatBytes(user.storage_quota_bytes)}</span></div><progress max={Math.max(1, user.storage_quota_bytes ?? Math.max(1, user.used_bytes + user.reserved_bytes))} value={user.used_bytes + user.reserved_bytes} /></div>) : <p role="status">{loading ? "Loading storage usage…" : "No user storage usage available."}</p>}</div>
         </article>
         <article className="admin-surface admin-library-card">
           <header><div><p>DOWNLOAD PACING</p><h2>yt-dlp throttling</h2><span>Slow playlist downloads to reduce rate limits. Applies to every inspect and download job.</span></div>{throttleSaveState && <span className="admin-library-save-status" role="status">{throttleSaveState === "saving" ? "Saving…" : "Saved"}</span>}</header>
@@ -1854,6 +1863,7 @@ export default function AdminDashboard() {
                   <span>Extract from server browser</span>
                   <div className="admin-cookie-extract-inputs">
                     <select
+                      aria-label="Server browser for cookies"
                       value={cookieBrowser}
                       onChange={(e) => setCookieBrowser(e.target.value)}
                       disabled={extractingCookies}
@@ -2009,7 +2019,7 @@ export default function AdminDashboard() {
     </section>
 
     {showCreateLibrary && <div className="admin-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreateLibrary(); }}>
-      <form className="admin-user-modal" onSubmit={createLibrary}>
+      <form className="admin-user-modal" role="dialog" aria-modal="true" aria-label="Create library" onSubmit={createLibrary}>
         <div className="admin-user-modal-head"><div><p>NEW LIBRARY</p><h2>Create library</h2></div><button type="button" aria-label="Close create library" onClick={closeCreateLibrary}>×</button></div>
         <p>Add a new media library to the server.</p>
         <label><span>Name</span><input autoFocus required maxLength={80} value={libraryName} onChange={(event) => setLibraryName(event.target.value)} placeholder="e.g. Family videos" /></label>
@@ -2018,7 +2028,7 @@ export default function AdminDashboard() {
       </form>
     </div>}
     {showAddLocation && <div className="admin-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeAddLocation(); }}>
-      <form className="admin-user-modal admin-user-modal-wide admin-location-modal" onSubmit={createLibraryLocation}>
+      <form className="admin-user-modal admin-user-modal-wide admin-location-modal" role="dialog" aria-modal="true" aria-label="Add server folder" onSubmit={createLibraryLocation}>
         <div className="admin-user-modal-head"><div><p>ATTACH SERVER FOLDER</p><h2>Add folder</h2></div><button type="button" aria-label="Close add library location" onClick={closeAddLocation}>×</button></div>
         <p>Browse folders on the TMS server. This works from your phone because the picker runs on the server, not on your device.</p>
         <div className="admin-location-mode" role="radiogroup" aria-label="How to add this folder"><button type="button" role="radio" aria-checked={locationMode === "library"} className={locationMode === "library" ? "active" : ""} onClick={() => setLocationMode("library")}><b>New library</b><small>Add this folder as its own library and choose its type.</small></button><button type="button" role="radio" aria-checked={locationMode === "folder"} className={locationMode === "folder" ? "active" : ""} onClick={() => setLocationMode("folder")}><b>Inside a library</b><small>Add it as a shortcut under an existing library.</small></button></div>
@@ -2032,7 +2042,7 @@ export default function AdminDashboard() {
       </form>
     </div>}
     {showAddUser && <div className="admin-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeAddUser(); }}>
-      <form className="admin-user-modal admin-user-modal-wide" onSubmit={addUser}>
+      <form className="admin-user-modal admin-user-modal-wide" role="dialog" aria-modal="true" aria-label="Add user" onSubmit={addUser}>
         <div className="admin-user-modal-head"><div><p>NEW USER</p><h2>Add user</h2></div><button type="button" aria-label="Close add user" onClick={closeAddUser}>×</button></div>
         <p>Create a TMS user. A password is optional for now.</p>
         <label><span>Name</span><input autoFocus required maxLength={80} value={userName} onChange={(event) => setUserName(event.target.value)} placeholder="Person name" /></label>
@@ -2044,8 +2054,8 @@ export default function AdminDashboard() {
         <div className="admin-user-modal-actions"><button type="button" onClick={closeAddUser}>Cancel</button><button className="primary" type="submit" disabled={!userName.trim() || creatingUser}>{creatingUser ? "Adding…" : "Add user"}</button></div>
       </form>
     </div>}
-    {editingUser && <div className="admin-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingUser && !deletingUser) setEditingUser(null); }}><form className="admin-user-modal admin-user-modal-wide" onSubmit={saveUser}>
-      <div className="admin-user-modal-head"><div><p>MANAGE USER</p><h2>{editingUser.name}</h2></div><button type="button" onClick={() => setEditingUser(null)}>×</button></div>
+    {editingUser && <div className="admin-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingUser && !deletingUser) setEditingUser(null); }}><form className="admin-user-modal admin-user-modal-wide" role="dialog" aria-modal="true" aria-label={`Manage ${editingUser.name}`} onSubmit={saveUser}>
+      <div className="admin-user-modal-head"><div><p>MANAGE USER</p><h2>{editingUser.name}</h2></div><button type="button" aria-label="Close manage user" onClick={() => setEditingUser(null)}>×</button></div>
       <p>Administrators always have every permission and unlimited storage. Changing a password signs that user out everywhere.</p>
       <label><span>Storage quota <small>GB · {formatBytes(editingUser.used_bytes)} currently used</small></span><input type="number" min="0" step="1" disabled={!canEditUsers || editQuotaUnlimited || editUserIsAdmin} value={editQuotaGb} onChange={(event) => setEditQuotaGb(event.target.value)} /></label>
       <label className="admin-checkbox-field"><input type="checkbox" checked={editQuotaUnlimited || editUserIsAdmin} disabled={!canEditUsers || editUserIsAdmin} onChange={(event) => setEditQuotaUnlimited(event.target.checked)} /><span><b>Unlimited storage</b><small>{editUserIsAdmin ? "Full administrators always have unlimited server storage." : "Lowering a quota below usage blocks new allocations but never deletes media."}</small></span></label>
@@ -2060,8 +2070,8 @@ export default function AdminDashboard() {
         {canEditUsers && <button className="primary" type="submit" disabled={savingUser || deletingUser}>{savingUser ? "Saving…" : "Save user"}</button>}
       </div>
     </form></div>}
-    {sessionUser && <div className="admin-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !revokingSession) setSessionUser(null); }}><section className="admin-user-modal admin-user-modal-wide admin-device-modal">
-      <div className="admin-user-modal-head"><div><p>REMEMBERED DEVICES</p><h2>{sessionUser.name}</h2></div><button type="button" onClick={() => setSessionUser(null)}>×</button></div>
+    {sessionUser && <div className="admin-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !revokingSession) setSessionUser(null); }}><section className="admin-user-modal admin-user-modal-wide admin-device-modal" role="dialog" aria-modal="true" aria-label={`Devices for ${sessionUser.name}`}>
+      <div className="admin-user-modal-head"><div><p>REMEMBERED DEVICES</p><h2>{sessionUser.name}</h2></div><button type="button" aria-label="Close remembered devices" onClick={() => setSessionUser(null)}>×</button></div>
       <p>Removing a device ends that session immediately. {sessionUser.is_admin ? "This account is an administrator." : ""}</p>
       {loadingSessions ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading devices</b></div> : <div className="settings-session-list admin-session-list">{userSessions.length ? userSessions.map((session) => <div className="settings-session-row" key={session.token}><div className="settings-session-icon">◉</div><div><b>{session.device}</b><small>Signed in {formatCreatedDate(session.created_at)}{session.ip_address ? ` · ${session.ip_address}` : ""}</small><small className="settings-user-agent">{session.user_agent || "Device details unavailable"}</small></div><button className="danger" disabled={Boolean(revokingSession)} onClick={() => void revokeUserSession(session)}>{revokingSession === session.token ? "Logging out…" : "Log out device"}</button></div>) : <div className="admin-panel-empty"><b>No active devices</b></div>}</div>}
     </section></div>}

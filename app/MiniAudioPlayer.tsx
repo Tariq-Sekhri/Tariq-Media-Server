@@ -14,6 +14,7 @@ import { clearNativeMediaSession, nativeMediaSessionAvailable, syncNativeMediaSe
 import { queueOfflineFavorite } from "./lib/offline";
 import OrganizeMediaModal, { type OrganizeSavedState } from "./OrganizeMediaModal";
 import { updateSnapshotOrganization } from "./lib/browse-cache";
+import { useBackLayer } from "./lib/back-layers";
 
 function QueueDurationProbe({ item, onDuration }: { item: MediaItem; onDuration: (path: string, duration: number) => void }) {
   if (!item.src || !item.path || item.duration || item.kind === "image") return null;
@@ -161,6 +162,9 @@ export default function MiniAudioPlayer({
   const [organizeOpen, setOrganizeOpen] = useState(false);
   const [organizeActive, setOrganizeActive] = useState(false);
   const [playbackError, setPlaybackError] = useState("");
+  useBackLayer(expanded, () => setExpanded(false));
+  useBackLayer(queueMenuOpen, () => setQueueMenuOpen(false));
+  useBackLayer(settingsMenuOpen, () => setSettingsMenuOpen(false));
 
   const queueIndex = queue.findIndex((entry) =>
     entry.id === item.id

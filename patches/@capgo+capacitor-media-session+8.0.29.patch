@@ -51,10 +51,10 @@ index 402bc6f..c2df303 100644
      public void onStop() {
          plugin.actionCallback("stop");
 diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionPlugin.java b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionPlugin.java
-index ce25ddf..f861ab5 100644
+index ce25ddf..20643a4 100644
 --- a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionPlugin.java
 +++ b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionPlugin.java
-@@ -30,10 +30,52 @@ import org.json.JSONObject;
+@@ -30,10 +30,53 @@ import org.json.JSONObject;
  @CapacitorPlugin(name = "MediaSession")
  public class MediaSessionPlugin extends Plugin {
  
@@ -69,10 +69,10 @@ index ce25ddf..f861ab5 100644
      private final String pluginVersion = "8.0.29";
  
      private static final String TAG = "CapgoMediaSession";
--
-+
+ 
 +    @Override
 +    protected void handleOnDestroy() {
++        destroyed = true;
 +        stopMediaService();
 +        if (activeInstance == this) {
 +            activeInstance = null;
@@ -108,7 +108,41 @@ index ce25ddf..f861ab5 100644
      private boolean startServiceOnlyDuringPlayback = true;
  
      private String title = "";
-@@ -74,6 +116,7 @@ public class MediaSessionPlugin extends Plugin {
+@@ -48,17 +91,25 @@ public class MediaSessionPlugin extends Plugin {
+     private final Map<String, PluginCall> actionHandlers = new HashMap<>();
+ 
+     private MediaSessionService service;
++    // ServiceConnection callbacks and lifecycle requests are serialized on main.
++    private boolean serviceBinding = false;
++    private boolean destroyed = false;
+ 
+     private final ServiceConnection serviceConnection = new ServiceConnection() {
+         @Override
+         public void onServiceConnected(ComponentName componentName, IBinder binder) {
++            serviceBinding = false;
+             MediaSessionService.LocalBinder localBinder = (MediaSessionService.LocalBinder) binder;
+             service = localBinder.getService();
+-            if (getActivity() == null) {
++            if (destroyed || getActivity() == null || (startServiceOnlyDuringPlayback && !isPlaybackActive())) {
++                stopMediaService();
+                 return;
+             }
+             Intent launchIntent = new Intent(getActivity(), getActivity().getClass());
+             service.connectAndInitialize(MediaSessionPlugin.this, launchIntent);
++            // Bind first, then start the already-promoted service. A pending bind
++            // can be cancelled without leaving an unmet foreground deadline.
++            ContextCompat.startForegroundService(getContext(), new Intent(getContext(), MediaSessionService.class));
+             updateServiceMetadata();
+             updateServicePlaybackState();
+             updateServicePositionState();
+@@ -68,12 +119,14 @@ public class MediaSessionPlugin extends Plugin {
+         public void onServiceDisconnected(ComponentName componentName) {
+             Log.d(TAG, "Disconnected from MediaSessionService");
+             service = null;
++            serviceBinding = false;
+         }
+     };
+ 
      @Override
      public void load() {
          super.load();
@@ -116,21 +150,75 @@ index ce25ddf..f861ab5 100644
  
          String foregroundServiceConfig = getConfig().getString("foregroundService", "");
          if ("always".equals(foregroundServiceConfig)) {
-@@ -221,6 +264,12 @@ public class MediaSessionPlugin extends Plugin {
+@@ -96,18 +149,20 @@ public class MediaSessionPlugin extends Plugin {
+ 
+     private void startMediaService() {
+         Context context = getContext();
+-        if (context == null || getActivity() == null) {
++        if (context == null || getActivity() == null || destroyed || service != null || serviceBinding) {
+             return;
+         }
+ 
+         Intent intent = new Intent(context, MediaSessionService.class);
+-        ContextCompat.startForegroundService(context, intent);
+-        context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
++        serviceBinding = context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
+     }
+ 
+     private void stopMediaService() {
+         Context context = getContext();
+-        if (context == null || service == null) {
++        if (context == null) return;
++        if (service == null && !(destroyed && serviceBinding)) {
++            // A connection still in flight observes the latest playback state
++            // before initializing. Do not start/unbind it repeatedly meanwhile.
+             return;
+         }
+ 
+@@ -117,6 +172,7 @@ public class MediaSessionPlugin extends Plugin {
+             Log.w(TAG, "Service already unbound", ex);
+         }
+         service = null;
++        serviceBinding = false;
+     }
+ 
+     private boolean isPlaybackActive() {
+@@ -220,18 +276,22 @@ public class MediaSessionPlugin extends Plugin {
+ 
      @PluginMethod
      public void setPlaybackState(PluginCall call) {
-         playbackState = call.getString("playbackState", playbackState);
-+        final boolean playing = "playing".equals(playbackState);
+-        playbackState = call.getString("playbackState", playbackState);
+-
+-        boolean playbackActive = isPlaybackActive();
+-        if (startServiceOnlyDuringPlayback && service == null && playbackActive) {
+-            startMediaService();
+-        } else if (startServiceOnlyDuringPlayback && service != null && !playbackActive) {
+-            stopMediaService();
+-        } else {
+-            updateServicePlaybackState();
+-        }
+-
+-        call.resolve();
 +        getBridge().getWebView().post(() -> {
++            playbackState = call.getString("playbackState", playbackState);
++            final boolean playing = "playing".equals(playbackState);
 +            if (getBridge().getWebView() instanceof MediaPlaybackHost) {
 +                ((MediaPlaybackHost) getBridge().getWebView()).onMediaSessionPlaybackStateChanged(playing);
 +            }
++            boolean playbackActive = isPlaybackActive();
++            if (startServiceOnlyDuringPlayback && service == null && playbackActive) {
++                startMediaService();
++            } else if (startServiceOnlyDuringPlayback && service != null && !playbackActive) {
++                stopMediaService();
++            } else {
++                updateServicePlaybackState();
++            }
++            call.resolve();
 +        });
--
-+
-         boolean playbackActive = isPlaybackActive();
-         if (startServiceOnlyDuringPlayback && service == null && playbackActive) {
-@@ -258,6 +307,18 @@ public class MediaSessionPlugin extends Plugin {
+     }
+ 
+     @PluginMethod
+@@ -258,6 +318,18 @@ public class MediaSessionPlugin extends Plugin {
          }
      }
  
@@ -149,7 +237,7 @@ index ce25ddf..f861ab5 100644
      public boolean hasActionHandler(String action) {
          PluginCall handler = actionHandlers.get(action);
          return handler != null && !PluginCall.CALLBACK_ID_DANGLING.equals(handler.getCallbackId());
-@@ -271,12 +332,25 @@ public class MediaSessionPlugin extends Plugin {
+@@ -271,12 +343,25 @@ public class MediaSessionPlugin extends Plugin {
          PluginCall handler = actionHandlers.get(action);
          if (handler != null && !PluginCall.CALLBACK_ID_DANGLING.equals(handler.getCallbackId())) {
              data.put("action", action);
@@ -177,7 +265,7 @@ index ce25ddf..f861ab5 100644
      public void getPluginVersion(final PluginCall call) {
          try {
 diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
-index e2c1f05..95b3ed0 100644
+index e2c1f05..c88c001 100644
 --- a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
 +++ b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
 @@ -11,6 +11,8 @@ import android.graphics.Bitmap;
@@ -215,11 +303,12 @@ index e2c1f05..95b3ed0 100644
      private int playbackState = PlaybackStateCompat.STATE_NONE;
      private String title = "";
      private String artist = "";
-@@ -66,6 +69,30 @@ public class MediaSessionService extends Service {
+@@ -66,6 +69,31 @@ public class MediaSessionService extends Service {
      private boolean playbackStateUpdate = false;
      private boolean mediaMetadataUpdate = false;
      private boolean notificationUpdate = false;
 +    private boolean foregroundStarted = false;
++    private int lastStartId = 0;
 +    private final Handler notificationHandler = new Handler(Looper.getMainLooper());
 +    private final Runnable maintainPlaybackNotification = new Runnable() {
 +        @Override public void run() {
@@ -246,7 +335,7 @@ index e2c1f05..95b3ed0 100644
  
      private MediaSessionPlugin plugin;
  
-@@ -119,6 +146,8 @@ public class MediaSessionService extends Service {
+@@ -119,6 +147,8 @@ public class MediaSessionService extends Service {
          notificationBuilder = new NotificationCompat.Builder(this, CHANNEL_ID)
              .setStyle(notificationStyle)
              .setSmallIcon(R.drawable.ic_baseline_volume_up_24)
@@ -255,7 +344,7 @@ index e2c1f05..95b3ed0 100644
              .setContentIntent(
                  PendingIntent.getActivity(
                      getApplicationContext(),
-@@ -134,6 +163,7 @@ public class MediaSessionService extends Service {
+@@ -134,6 +164,7 @@ public class MediaSessionService extends Service {
          } else {
              startForeground(NOTIFICATION_ID, notificationBuilder.build());
          }
@@ -263,7 +352,7 @@ index e2c1f05..95b3ed0 100644
  
          notificationActions.put(
              "play",
-@@ -142,7 +172,7 @@ public class MediaSessionService extends Service {
+@@ -142,7 +173,7 @@ public class MediaSessionService extends Service {
                  "Play",
                  MediaButtonReceiver.buildMediaButtonPendingIntent(
                      this,
@@ -272,7 +361,7 @@ index e2c1f05..95b3ed0 100644
                  )
              )
          );
-@@ -153,7 +183,7 @@ public class MediaSessionService extends Service {
+@@ -153,7 +184,7 @@ public class MediaSessionService extends Service {
                  "Pause",
                  MediaButtonReceiver.buildMediaButtonPendingIntent(
                      this,
@@ -281,7 +370,7 @@ index e2c1f05..95b3ed0 100644
                  )
              )
          );
-@@ -197,6 +227,10 @@ public class MediaSessionService extends Service {
+@@ -197,6 +228,10 @@ public class MediaSessionService extends Service {
                  MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_STOP)
              )
          );
@@ -292,7 +381,7 @@ index e2c1f05..95b3ed0 100644
  
          playbackStateActions.put("previoustrack", PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS);
          playbackStateActions.put("seekbackward", PlaybackStateCompat.ACTION_REWIND);
-@@ -208,17 +242,84 @@ public class MediaSessionService extends Service {
+@@ -208,17 +243,90 @@ public class MediaSessionService extends Service {
          playbackStateActions.put("stop", PlaybackStateCompat.ACTION_STOP);
      }
  
@@ -317,12 +406,16 @@ index e2c1f05..95b3ed0 100644
 +    }
 +
      public void destroy() {
++        // An old binding can finish after another start request is queued.
++        // Only stop the started-service generation that this instance handled.
++        if (lastStartId != 0 && !stopSelfResult(lastStartId)) return;
 +        notificationHandler.removeCallbacks(maintainPlaybackNotification);
          stopForeground(true);
+-        stopSelf();
 +        foregroundStarted = false;
-         stopSelf();
-     }
- 
++        if (lastStartId == 0) stopSelf();
++    }
++
 +    @Override
 +    public void onDestroy() {
 +        notificationHandler.removeCallbacks(maintainPlaybackNotification);
@@ -344,11 +437,14 @@ index e2c1f05..95b3ed0 100644
 +        }
 +        destroy();
 +        super.onTaskRemoved(rootIntent);
-+    }
-+
+     }
+ 
      @Override
      public int onStartCommand(Intent intent, int flags, int startId) {
-+        if (!foregroundStarted) {
++        lastStartId = startId;
++        // Each foreground start request needs promotion, including a newer
++        // request delivered after an old binding's teardown was rejected.
++        {
 +            // startForegroundService must be promoted immediately, even if the
 +            // WebView/plugin binding is delayed while the app leaves PiP.
 +            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -356,7 +452,7 @@ index e2c1f05..95b3ed0 100644
 +                notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
 +                if (notificationManager != null) notificationManager.createNotificationChannel(channel);
 +            }
-+            NotificationCompat.Builder starting = new NotificationCompat.Builder(this, CHANNEL_ID)
++            NotificationCompat.Builder starting = notificationBuilder != null ? notificationBuilder : new NotificationCompat.Builder(this, CHANNEL_ID)
 +                .setSmallIcon(R.drawable.ic_baseline_volume_up_24)
 +                .setContentTitle("TMS")
 +                .setContentText("Preparing playback")
@@ -378,7 +474,7 @@ index e2c1f05..95b3ed0 100644
      }
  
      public void setPlaybackState(int newPlaybackState) {
-@@ -226,6 +327,11 @@ public class MediaSessionService extends Service {
+@@ -226,6 +334,11 @@ public class MediaSessionService extends Service {
              playbackState = newPlaybackState;
              playbackStateUpdate = true;
              possibleActionsUpdate = true;
@@ -390,7 +486,7 @@ index e2c1f05..95b3ed0 100644
          }
      }
  
-@@ -318,7 +424,16 @@ public class MediaSessionService extends Service {
+@@ -318,7 +431,16 @@ public class MediaSessionService extends Service {
              }
  
              if (playbackStateBuilder != null) {
@@ -408,7 +504,7 @@ index e2c1f05..95b3ed0 100644
              }
              if (notificationStyle != null) {
                  if (compactNotificationActionIndicesIndex > 0) {
-@@ -336,7 +451,7 @@ public class MediaSessionService extends Service {
+@@ -336,7 +458,7 @@ public class MediaSessionService extends Service {
          }
  
          if (playbackStateUpdate && playbackStateBuilder != null) {
@@ -417,7 +513,7 @@ index e2c1f05..95b3ed0 100644
              mediaSession.setPlaybackState(playbackStateBuilder.build());
              playbackStateUpdate = false;
          }
-@@ -353,7 +468,8 @@ public class MediaSessionService extends Service {
+@@ -353,7 +475,8 @@ public class MediaSessionService extends Service {
          }
  
          if (notificationUpdate && notificationBuilder != null && notificationManager != null) {
@@ -457,16 +553,3 @@ index 0000000..cd2605e
 +        android:fillColor="#FFFFFFFF"
 +        android:pathData="M22,9.24l-7.19,-0.62L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21 12,17.27 18.18,21l-1.63,-7.03L22,9.24zM12,15.4l-3.76,2.27 1,-4.28 -3.32,-2.88 4.38,-0.38L12,6.1l1.71,4.04 4.38,0.38 -3.32,2.88 1,4.28L12,15.4z" />
 +</vector>
-diff --git a/node_modules/@capgo/capacitor-media-session/dist/esm/definitions.d.ts b/node_modules/@capgo/capacitor-media-session/dist/esm/definitions.d.ts
-index b090867..3108307 100644
---- a/node_modules/@capgo/capacitor-media-session/dist/esm/definitions.d.ts
-+++ b/node_modules/@capgo/capacitor-media-session/dist/esm/definitions.d.ts
-@@ -4,7 +4,7 @@ export interface MediaImage {
-     type?: string;
- }
- export type MediaSessionPlaybackState = 'none' | 'paused' | 'playing';
--export type MediaSessionAction = 'play' | 'pause' | 'seekbackward' | 'seekforward' | 'previoustrack' | 'nexttrack' | 'seekto' | 'stop';
-+export type MediaSessionAction = 'play' | 'pause' | 'seekbackward' | 'seekforward' | 'previoustrack' | 'nexttrack' | 'seekto' | 'stop' | 'favorite';
- export interface MetadataOptions {
-     album?: string;
-     artist?: string;

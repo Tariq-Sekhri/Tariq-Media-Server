@@ -16,8 +16,8 @@ export default function LibraryPlaybackSettings({ libraries }: { libraries: stri
       const saved = settings[library.toLowerCase()] ?? {};
       return <div key={library} className="profile-library-playback-row">
         <b>{library}</b>
-        <label className="profile-device-path-option"><input type="checkbox" checked={Boolean(saved.startFresh)} onChange={e => toggle(library, "startFresh", e.target.checked)} /><span>Always start from the beginning</span></label>
-        {alongside && <label className="profile-device-path-option"><input type="checkbox" checked={Boolean(saved.alongside)} onChange={e => toggle(library, "alongside", e.target.checked)} /><span>Play alongside other media</span></label>}
+        <label className="profile-device-path-option"><input type="checkbox" aria-label={`${library}: always start from the beginning`} checked={Boolean(saved.startFresh)} onChange={e => toggle(library, "startFresh", e.target.checked)} /><span>Always start from the beginning</span></label>
+        {alongside && <label className="profile-device-path-option"><input type="checkbox" aria-label={`${library}: play alongside other media`} checked={Boolean(saved.alongside)} onChange={e => toggle(library, "alongside", e.target.checked)} /><span>Play alongside other media</span></label>}
       </div>;
     })}
   </fieldset>;

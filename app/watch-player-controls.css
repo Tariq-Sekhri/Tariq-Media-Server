@@ -642,3 +642,19 @@
   :is(.watch-player, .miniplayer) .watch-control-row { min-height: 48px !important; overflow: visible; }
   :is(.watch-player, .miniplayer) .watch-control-row .watch-controls-right button { height: 48px !important; min-height: 48px !important; }
 }
+
+/* Audio controls keep their own stable layout when switching views or expanding the queue. */
+@media (max-width: 760px) {
+  .miniplayer .miniplayer-header { min-height: 48px; padding: 0 12px; gap: 8px; }
+  .miniplayer .miniplayer-expand { width: 48px; min-width: 48px; height: 48px; min-height: 48px; }
+  .miniplayer .miniplayer-shell.watch-controls { padding: 0 12px 4px; opacity: 1; pointer-events: auto; transform: none; }
+  .miniplayer .watch-seek-wrap { margin-bottom: 0; }
+  .miniplayer .watch-control-row .watch-controls-left button,
+  .miniplayer .watch-control-row .watch-controls-right button { width: 48px !important; min-width: 48px !important; height: 48px !important; min-height: 48px !important; flex-shrink: 0; }
+  .miniplayer .watch-controls-left { gap: 2px; min-width: 0; }
+  .miniplayer .watch-control-row { gap: 4px; }
+  .miniplayer .watch-readout { min-width: 0; font-size: 13px; }
+  .miniplayer.expanded .miniplayer-content { grid-template-rows: auto minmax(0, 1fr); }
+  .miniplayer.expanded .miniplayer-shell.watch-controls { padding: 12px; justify-content: flex-start; }
+  .miniplayer.expanded .miniplayer-header { padding: 8px 12px; }
+}
