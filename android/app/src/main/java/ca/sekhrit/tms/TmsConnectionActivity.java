@@ -30,6 +30,8 @@ import org.json.JSONObject;
 /** Choose a reachable server before creating the WebView. No network work on the UI thread. */
 public class TmsConnectionActivity extends Activity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    /** True when launch found no reachable server and the bundled offline shell is in use. */
+    static volatile boolean usingOfflineFallback;
 
     private static File routeDirectory(Context context) {
         return new File(context.getFilesDir(), "server-route");
@@ -69,22 +71,16 @@ public class TmsConnectionActivity extends Activity {
             JSONObject server = config.optJSONObject("server");
             if (server == null) { server = new JSONObject(); config.put("server", server); }
             String configured = server.optString("url", "");
-            JSONObject plugins = config.optJSONObject("plugins");
-            JSONObject connection = plugins == null ? null : plugins.optJSONObject("TmsConnection");
-            String local = connection == null ? "" : connection.optString("localUrl", "");
-            String tailscale = connection == null ? "" : connection.optString("tailscaleUrl", "");
-            LinkedHashSet<String> candidates = new LinkedHashSet<>();
-            if (!local.isEmpty()) candidates.add(emulatorAddress(local));
-            if (!tailscale.isEmpty()) candidates.add(tailscale);
-            if (!configured.isEmpty()) candidates.add(configured);
+            String tailscale = tailscaleUrl(config);
             String selected = null;
-            for (String candidate : candidates) {
+            for (String candidate : candidates(this, config)) {
                 boolean reachable = reachable(candidate);
                 String label = candidate.equals(tailscale) ? "tailscale" : candidate.equals(configured) ? "configured" : "direct";
                 Log.i("TmsConnection", "Route " + label
                     + " " + (reachable ? "reachable" : "unavailable"));
                 if (reachable) { selected = candidate; break; }
             }
+            usingOfflineFallback = selected == null;
             if (selected != null) {
                 server.put("url", selected);
                 server.put("cleartext", selected.startsWith("http://"));
@@ -104,9 +100,41 @@ public class TmsConnectionActivity extends Activity {
         }
     }
 
-    private String emulatorAddress(String local) {
+    private static String tailscaleUrl(JSONObject config) {
+        JSONObject plugins = config.optJSONObject("plugins");
+        JSONObject connection = plugins == null ? null : plugins.optJSONObject("TmsConnection");
+        return connection == null ? "" : connection.optString("tailscaleUrl", "");
+    }
+
+    private static LinkedHashSet<String> candidates(Context context, JSONObject config) {
+        JSONObject server = config.optJSONObject("server");
+        String configured = server == null ? "" : server.optString("url", "");
+        JSONObject plugins = config.optJSONObject("plugins");
+        JSONObject connection = plugins == null ? null : plugins.optJSONObject("TmsConnection");
+        String local = connection == null ? "" : connection.optString("localUrl", "");
+        String tailscale = tailscaleUrl(config);
+        LinkedHashSet<String> candidates = new LinkedHashSet<>();
+        if (!local.isEmpty()) candidates.add(emulatorAddress(context, local));
+        if (!tailscale.isEmpty()) candidates.add(tailscale);
+        if (!configured.isEmpty()) candidates.add(configured);
+        return candidates;
+    }
+
+    /** Background-thread probe used to leave the offline shell once any route answers. */
+    static boolean anyRouteReachable(Context context) {
+        try (var input = context.getAssets().open("capacitor.config.json")) {
+            for (String candidate : candidates(context, new JSONObject(readText(input)))) {
+                if (reachable(candidate)) return true;
+            }
+        } catch (Exception error) {
+            Log.i("TmsConnection", "Reconnect probe failed: " + error.getClass().getSimpleName());
+        }
+        return false;
+    }
+
+    private static String emulatorAddress(Context context, String local) {
         if (!(Build.HARDWARE.contains("ranchu") || Build.HARDWARE.contains("goldfish"))) return local;
-        ConnectivityManager connectivity = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        ConnectivityManager connectivity = (ConnectivityManager) context.getSystemService(CONNECTIVITY_SERVICE);
         LinkProperties properties = connectivity.getLinkProperties(connectivity.getActiveNetwork());
         if (properties != null) {
             for (var route : properties.getRoutes()) {
@@ -124,8 +152,8 @@ public class TmsConnectionActivity extends Activity {
         HttpURLConnection request = null;
         try {
             request = (HttpURLConnection) new URL(origin + "/api/health").openConnection();
-            request.setConnectTimeout(1500);
-            request.setReadTimeout(1500);
+            request.setConnectTimeout(3000);
+            request.setReadTimeout(3000);
             request.setInstanceFollowRedirects(false);
             int status = request.getResponseCode();
             if (status != 200) {

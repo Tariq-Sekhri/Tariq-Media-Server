@@ -40,6 +40,10 @@ public class MainActivity extends BridgeActivity {
     private boolean pipSettingsRequested;
     private boolean rendererRecoveryStarted;
     private final Runnable rehideSystemBars = this::applyStickyImmersiveMode;
+    private static final long RECONNECT_INTERVAL_MS = 15_000;
+    private final android.os.Handler reconnectHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private volatile boolean reconnectProbeRunning;
+    private final Runnable reconnectProbe = this::probeServerFromOfflineShell;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -119,10 +123,42 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         TmsPipPlugin.emitAction("foreground");
         scheduleStickyImmersiveMode();
+        reconnectHandler.removeCallbacks(reconnectProbe);
+        if (TmsConnectionActivity.usingOfflineFallback) reconnectHandler.post(reconnectProbe);
         if (pipSettingsRequested) {
             pipSettingsRequested = false;
             if (pipEligible && pipAllowed()) enterPictureInPictureMode(buildPipParams());
         }
+    }
+
+    @Override
+    public void onPause() {
+        reconnectHandler.removeCallbacks(reconnectProbe);
+        super.onPause();
+    }
+
+    /**
+     * The offline shell cannot reach the server through relative URLs, so
+     * retry the launch routes natively and restart through route selection
+     * once one answers. Playback is never interrupted for this.
+     */
+    private void probeServerFromOfflineShell() {
+        if (!TmsConnectionActivity.usingOfflineFallback || reconnectProbeRunning || isFinishing()) return;
+        reconnectProbeRunning = true;
+        new Thread(() -> {
+            boolean reachable = TmsConnectionActivity.anyRouteReachable(this);
+            runOnUiThread(() -> {
+                reconnectProbeRunning = false;
+                if (isFinishing() || isDestroyed()) return;
+                if (reachable && !pipPlaying) {
+                    TmsConnectionActivity.usingOfflineFallback = false;
+                    startActivity(new Intent(this, TmsConnectionActivity.class));
+                    finish();
+                } else {
+                    reconnectHandler.postDelayed(reconnectProbe, RECONNECT_INTERVAL_MS);
+                }
+            });
+        }, "tms-reconnect").start();
     }
 
     @Override
