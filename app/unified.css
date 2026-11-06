@@ -6525,6 +6525,7 @@ body .discover-title-dialog .discover-dialog-header { position: static; flex: 0 
   .unified-layout .hub-folder-rail .sidebar-collection-items a > button > span:first-child:not(.folder-label) { visibility: hidden; }
   .unified-layout .hub-folder-rail .sidebar-collection-collapse { display: none !important; }
   body:has(.rail-drawer-backdrop) .rail-drawer-backdrop { z-index: 185 !important; background: #000a !important; }
+  body:has(.rail-drawer-backdrop) .miniplayer:not(.expanded) { z-index: 180; }
   .unified-layout .hub-folder-rail button:has(> .folder-label) { grid-template-columns: 22px minmax(0,1fr) auto !important; column-gap: 10px !important; }
   .unified-layout .hub-folder-rail button:has(> .folder-label) > span:first-child:not(.folder-label) { width: 22px !important; display: inline-grid !important; place-items: center; color: #b9b3c8; }
   .unified-layout .hub-folder-rail a > button > span:first-child:not(.folder-label), .unified-layout .hub-folder-rail > button:has(> .folder-label) > span:first-child { font-size: 0 !important; color: transparent !important; }
