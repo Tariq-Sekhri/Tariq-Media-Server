@@ -1,15 +1,29 @@
 # TMS
 
-Tariq's Media Server is a private media server built to address two limitations
-I encountered with Jellyfin:
+Tariq's Media Server combines streaming with direct control over the media library.
+It grew out of two needs I had while using Jellyfin: giving users more ways to
+manage media, and downloading movies from discovery through to playback in one app.
 
-- **More control for users:** upload videos and ask the server to download media
-  from YouTube and other supported sites directly within the app.
-- **Integrated movie discovery and downloads:** find a movie in Discover and
-  download it to the server without leaving the app.
+## How it compares to Jellyfin
 
-TMS brings browsing, streaming, and library management together with these
-workflows. It is built with React, Vinext, and Rust.
+This comparison focuses on Jellyfin's standard experience; plugins and companion
+services can extend it.
+
+| Workflow | TMS | Jellyfin |
+| --- | --- | --- |
+| Upload media | Upload files directly in the app | Typically copy files to the server outside the media app |
+| Manage files and folders | Move and rename files, create folders, and organize in bulk | Typically use filesystem tools or external media managers for these operations |
+| Control user actions | Per-library permissions for uploads, moves, renames, folder creation, deletion, and server downloads | Library access and media deletion permissions are built in |
+| Download from YouTube and other sites | Submit a URL and queue a server download in the app using yt-dlp | Typically use a separate downloader |
+| Discover and acquire movies | Find a movie in Discover, request or start its download, and track progress in the app | Typically add companion services such as Seerr and Radarr; integrations can bring requests into Jellyfin clients |
+
+TMS keeps these workflows in one interface, with actions limited by the user's
+permissions. Downloads still rely on server tools such as yt-dlp and qBittorrent.
+It is built with React, Vinext, and Rust.
+
+References: [Jellyfin user permissions](https://jellyfin.org/docs/general/server/users/adding-managing-users/),
+[Jellyfin library setup](https://jellyfin.org/docs/general/server/libraries/),
+and [Seerr integrations](https://docs.seerr.dev/).
 
 ## Run locally
 
