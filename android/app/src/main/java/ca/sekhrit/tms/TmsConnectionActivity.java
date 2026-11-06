@@ -103,7 +103,7 @@ public class TmsConnectionActivity extends Activity {
     private static String tailscaleUrl(JSONObject config) {
         JSONObject plugins = config.optJSONObject("plugins");
         JSONObject connection = plugins == null ? null : plugins.optJSONObject("TmsConnection");
-        return connection == null ? "" : connection.optString("tailscaleUrl", "");
+        return urlOption(connection, "tailscaleUrl");
     }
 
     private static LinkedHashSet<String> candidates(Context context, JSONObject config) {
@@ -111,13 +111,20 @@ public class TmsConnectionActivity extends Activity {
         String configured = server == null ? "" : server.optString("url", "");
         JSONObject plugins = config.optJSONObject("plugins");
         JSONObject connection = plugins == null ? null : plugins.optJSONObject("TmsConnection");
-        String local = connection == null ? "" : connection.optString("localUrl", "");
+        String local = urlOption(connection, "localUrl");
         String tailscale = tailscaleUrl(config);
         LinkedHashSet<String> candidates = new LinkedHashSet<>();
         if (!local.isEmpty()) candidates.add(emulatorAddress(context, local));
         if (!tailscale.isEmpty()) candidates.add(tailscale);
         if (!configured.isEmpty()) candidates.add(configured);
         return candidates;
+    }
+
+    /** JSON null (CI builds have no local routes) must not become the string "null". */
+    private static String urlOption(JSONObject connection, String key) {
+        if (connection == null || connection.isNull(key)) return "";
+        String value = connection.optString(key, "").trim();
+        return value.startsWith("http://") || value.startsWith("https://") ? value : "";
     }
 
     /** Background-thread probe used to leave the offline shell once any route answers. */

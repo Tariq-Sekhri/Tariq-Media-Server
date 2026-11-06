@@ -48,6 +48,11 @@ jobs:
           TMS_CAPACITOR_SERVER_URL: ${{ secrets.TMS_CAPACITOR_SERVER_URL }}
         run: |
           test -n "$TMS_CAPACITOR_SERVER_URL"
+          # Phones cannot reach emulator or loopback addresses; refuse to ship them.
+          if printf '%s' "$TMS_CAPACITOR_SERVER_URL" | grep -Eq '//(10\.0\.2\.2|localhost|127\.)'; then
+            echo "TMS_CAPACITOR_SERVER_URL points at an emulator or loopback address" >&2
+            exit 1
+          fi
           npm run build
           npx cap sync android
       - name: Restore upload signing key
