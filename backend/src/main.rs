@@ -39,6 +39,7 @@ use walkdir::WalkDir;
 mod discovery;
 mod qbit;
 mod uploads;
+mod ytdlp_archive;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -110,6 +111,7 @@ struct AppState {
     qbit_restart_lock: Arc<tokio::sync::Mutex<()>>,
     ytdlp_tool: Arc<tokio::sync::Mutex<YtDlpToolStatus>>,
     ytdlp_notify: Arc<tokio::sync::Notify>,
+    ytdlp_archive: Arc<tokio::sync::Mutex<ytdlp_archive::DownloadArchive>>,
     active_transcodes: Arc<tokio::sync::Mutex<BTreeMap<String, ActiveTranscode>>>,
     transcode_start_lock: Arc<tokio::sync::Mutex<()>>,
     http: reqwest::Client,
@@ -1844,6 +1846,7 @@ async fn main() {
         qbit_restart_lock: Arc::new(tokio::sync::Mutex::new(())),
         ytdlp_tool: Arc::new(tokio::sync::Mutex::new(YtDlpToolStatus::default())),
         ytdlp_notify: Arc::new(tokio::sync::Notify::new()),
+        ytdlp_archive: Arc::new(tokio::sync::Mutex::new(ytdlp_archive::DownloadArchive::default())),
         active_transcodes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
         transcode_start_lock: Arc::new(tokio::sync::Mutex::new(())),
         http: reqwest::Client::new(),
@@ -17053,6 +17056,19 @@ async fn inspect_ytdlp_metadata(
             (status, message)
         }
     })?;
+    let already_downloaded = state
+        .ytdlp_archive
+        .lock()
+        .await
+        .contains_video(&state.ytdlp_dir.join("archive.txt"), &metadata)
+        .await
+        .map_err(|error| {
+            tracing::warn!(%error, "Could not read yt-dlp download archive");
+            (StatusCode::SERVICE_UNAVAILABLE, "Could not check download history. Try again shortly.".to_owned())
+        })?;
+    if already_downloaded {
+        return Err((StatusCode::CONFLICT, "This video has already been downloaded.".to_owned()));
+    }
     let title = metadata
         .get("title")
         .or_else(|| metadata.get("playlist_title"))
@@ -18135,9 +18151,12 @@ async fn finalize_ytdlp_job(state: &AppState, job_id: &str, pid: Option<u32>) {
                 run_error.clone().unwrap_or(message.clone())
             };
 
-            // If yt-dlp completed without errors and all items were already recorded in the archive,
-            // treat the job as successfully completed rather than failed.
+            // Empty output alone does not prove success: require an actual archive skip.
+            let stdout = tokio::fs::read_to_string(staging.join("stdout.log"))
+                .await
+                .unwrap_or_default();
             if message == "yt-dlp finished without producing supported media files."
+                && ytdlp_archive::has_archive_skip(&stdout)
                 && run_error.is_none()
                 && !was_interrupted
                 && !is_ytdlp_auth_or_cookie_error(&stderr)
