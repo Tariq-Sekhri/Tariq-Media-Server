@@ -1,8 +1,15 @@
 # TMS
 
-Tariq's Media Server is a private media library built with React, Vinext, and Rust.
-Browse and stream media, organize playlists and tags, upload files, and queue
-URL or VPN-protected magnet downloads.
+Tariq's Media Server is a private media server built to address two limitations
+I encountered with Jellyfin:
+
+- **More control for users:** upload videos and ask the server to download media
+  from YouTube and other supported sites directly within the app.
+- **Integrated movie discovery and downloads:** find a movie in Discover and
+  download it to the server without leaving the app.
+
+TMS brings browsing, streaming, and library management together with these
+workflows. It is built with React, Vinext, and Rust.
 
 ## Run locally
 
