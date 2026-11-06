@@ -1,0 +1,29 @@
+diff --git a/node_modules/vinext/dist/config/config-matchers.js b/node_modules/vinext/dist/config/config-matchers.js
+index 057a326..02532ec 100644
+--- a/node_modules/vinext/dist/config/config-matchers.js
++++ b/node_modules/vinext/dist/config/config-matchers.js
+@@ -736,7 +736,10 @@ async function proxyExternalRequest(request, externalUrl) {
+ 		init.duplex = "half";
+ 	}
+ 	const controller = new AbortController();
+-	const timeout = setTimeout(() => controller.abort(), 3e4);
++	// TMS: the upstream only answers after it has received the whole request
++	// body, so a fixed 30s limit aborts any upload slower than that. Give
++	// body-carrying requests (upload chunks) a much longer allowance.
++	const timeout = setTimeout(() => controller.abort(), hasBody && request.body ? 6e5 : 3e4);
+ 	let upstreamResponse;
+ 	try {
+ 		upstreamResponse = await fetch(targetUrl.href, {
+diff --git a/node_modules/vinext/dist/server/static-file-cache.js b/node_modules/vinext/dist/server/static-file-cache.js
+index ba3bec2..2688a3f 100644
+--- a/node_modules/vinext/dist/server/static-file-cache.js
++++ b/node_modules/vinext/dist/server/static-file-cache.js
+@@ -204,7 +204,7 @@ async function* walkFilesWithStats(dir, base = dir) {
+ 		const batch = files.slice(i, i + STAT_BATCH_SIZE);
+ 		const stats = await Promise.all(batch.map((f) => fsp.stat(f)));
+ 		for (let j = 0; j < batch.length; j++) yield {
+-			relativePath: path.relative(base, batch[j]),
++			relativePath: path.relative(base, batch[j]).split(path.sep).join("/"),
+ 			fullPath: batch[j],
+ 			stat: {
+ 				size: stats[j].size,

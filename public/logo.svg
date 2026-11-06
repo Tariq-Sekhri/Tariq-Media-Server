@@ -1,0 +1,51 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="tms-bg" x1="5" y1="3" x2="28" y2="30" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B29AFF"/>
+      <stop offset="0.45" stop-color="#8F74F2"/>
+      <stop offset="1" stop-color="#5736E0"/>
+    </linearGradient>
+    <linearGradient id="tms-rim" x1="8" y1="8" x2="24" y2="25" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.65"/>
+      <stop offset="0.35" stop-color="#FFFFFF" stop-opacity="0.1"/>
+      <stop offset="0.65" stop-color="#5A4890" stop-opacity="0"/>
+      <stop offset="1" stop-color="#4A3A78" stop-opacity="0.38"/>
+    </linearGradient>
+    <filter id="tms-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.2" stdDeviation="1.1" flood-color="#2A145E" flood-opacity="0.45"/>
+    </filter>
+    <filter id="t-concave" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.07 0.1" numOctaves="3" seed="12" result="terrain"/>
+      <feGaussianBlur in="terrain" stdDeviation="0.9" result="softTerrain"/>
+      <feColorMatrix in="softTerrain" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.07 0" result="grain"/>
+      <feComposite in="grain" in2="SourceAlpha" operator="in" result="grainClip"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.15" result="blur"/>
+      <feOffset in="blur" dx="0.55" dy="0.55" result="offset"/>
+      <feComposite in="offset" in2="SourceAlpha" operator="arithmetic" k2="-1" k3="1" result="innerShadow"/>
+      <feFlood flood-color="#6E5E9E" flood-opacity="0.24" result="shadowColor"/>
+      <feComposite in="shadowColor" in2="innerShadow" operator="in" result="wallShadow"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="0.85" result="blur2"/>
+      <feOffset in="blur2" dx="-0.45" dy="-0.45" result="offset2"/>
+      <feComposite in="offset2" in2="SourceAlpha" operator="arithmetic" k2="-1" k3="1" result="innerHighlight"/>
+      <feFlood flood-color="#FFFFFF" flood-opacity="0.32" result="highlightColor"/>
+      <feComposite in="highlightColor" in2="innerHighlight" operator="in" result="rimLight"/>
+      <feMerge>
+        <feMergeNode in="SourceGraphic"/>
+        <feMergeNode in="grainClip"/>
+        <feMergeNode in="wallShadow"/>
+        <feMergeNode in="rimLight"/>
+      </feMerge>
+    </filter>
+    <clipPath id="tms-t-clip">
+      <path d="M8.2 9.2H23.8V12.8H18.4V24.2H13.6V12.8H8.2V9.2Z"/>
+    </clipPath>
+  </defs>
+  <g filter="url(#tms-shadow)">
+    <rect width="32" height="32" rx="9" fill="url(#tms-bg)"/>
+    <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="8.5" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="1"/>
+    <g clip-path="url(#tms-t-clip)">
+      <path d="M8.2 9.2H23.8V12.8H18.4V24.2H13.6V12.8H8.2V9.2Z" fill="#FFFFFF" filter="url(#t-concave)"/>
+      <path d="M8.2 9.2H23.8V12.8H18.4V24.2H13.6V12.8H8.2V9.2Z" fill="none" stroke="url(#tms-rim)" stroke-width="0.7"/>
+    </g>
+  </g>
+</svg>

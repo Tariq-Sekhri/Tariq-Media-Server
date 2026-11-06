@@ -1,0 +1,60 @@
+{
+  "name": "tms",
+  "version": "0.0.41",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vinext dev",
+    "backend:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/backend-dev.ps1",
+    "backend:build": "cargo build --manifest-path backend/Cargo.toml",
+    "build": "vinext build && node scripts/build-app-shell.mjs",
+    "start": "vinext start",
+    "test": "npm run test:unit && npm run build",
+    "test:unit": "node --test tests/*.test.cjs",
+    "check:offline": "node --test tests/offline-ui-parity.test.cjs tests/offline-organization.test.cjs",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "android:sync": "npm run build && cap sync android",
+    "android:open": "cap open android",
+    "android:icons": "capacitor-assets generate --android",
+    "android:aab": "powershell -NoProfile -ExecutionPolicy Bypass -File ./mobile_build.ps1",
+    "mobile:start": "powershell -NoProfile -ExecutionPolicy Bypass -File ./mobile_start.ps1",
+    "mobile:kill": "powershell -NoProfile -ExecutionPolicy Bypass -File ./mobile_kill.ps1",
+    "mobile:build": "powershell -NoProfile -ExecutionPolicy Bypass -File ./mobile_build.ps1",
+    "bump": "powershell -NoProfile -ExecutionPolicy Bypass -File ./bump.ps1",
+    "postinstall": "patch-package",
+    "demo": "node scripts/demo.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/status-bar": "^8.0.3",
+    "@capgo/capacitor-media-session": "^8.0.29",
+    "@capgo/capacitor-navigation-bar": "^8.2.6",
+    "hls.js": "^1.6.16",
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "patch-package": "^8.0.1",
+    "react-server-dom-webpack": "19.2.6",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.0.13"
+  },
+  "type": "module"
+}

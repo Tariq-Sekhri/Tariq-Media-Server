@@ -1,0 +1,12 @@
+diff --git a/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/AndroidProtocolHandler.java b/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/AndroidProtocolHandler.java
+--- a/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/AndroidProtocolHandler.java
++++ b/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/AndroidProtocolHandler.java
+@@ -80,7 +80,7 @@ public class AndroidProtocolHandler {
+         InputStream stream = null;
+         try {
+             stream = context.getContentResolver().openInputStream(Uri.parse(realPath));
+-        } catch (SecurityException e) {
++        } catch (RuntimeException e) {
+             Logger.error("Unable to open content URL: " + uri, e);
+         }
+         return stream;

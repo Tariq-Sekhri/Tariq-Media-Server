@@ -1,0 +1,472 @@
+diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/AndroidManifest.xml b/node_modules/@capgo/capacitor-media-session/android/src/main/AndroidManifest.xml
+index 5124ddd..bbd21e5 100644
+--- a/node_modules/@capgo/capacitor-media-session/android/src/main/AndroidManifest.xml
++++ b/node_modules/@capgo/capacitor-media-session/android/src/main/AndroidManifest.xml
+@@ -21,6 +21,10 @@
+                 <action android:name="android.intent.action.MEDIA_BUTTON" />
+             </intent-filter>
+         </receiver>
++
++        <receiver
++            android:name=".FavoriteMediaReceiver"
++            android:exported="false" />
+     </application>
+ 
+ </manifest>
+diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/FavoriteMediaReceiver.java b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/FavoriteMediaReceiver.java
+new file mode 100644
+index 0000000..e97e62c
+--- /dev/null
++++ b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/FavoriteMediaReceiver.java
+@@ -0,0 +1,13 @@
++package com.capgo.mediasession;
++
++import android.content.BroadcastReceiver;
++import android.content.Context;
++import android.content.Intent;
++
++public class FavoriteMediaReceiver extends BroadcastReceiver {
++
++    @Override
++    public void onReceive(Context context, Intent intent) {
++        MediaSessionPlugin.emitFavoriteAction();
++    }
++}
+diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionCallback.java b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionCallback.java
+index 402bc6f..c2df303 100644
+--- a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionCallback.java
++++ b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionCallback.java
+@@ -48,6 +48,13 @@ public class MediaSessionCallback extends MediaSessionCompat.Callback {
+         plugin.actionCallback("nexttrack");
+     }
+ 
++    @Override
++    public void onCustomAction(String action, android.os.Bundle extras) {
++        if ("favorite".equals(action)) {
++            plugin.actionCallback("favorite");
++        }
++    }
++
+     @Override
+     public void onStop() {
+         plugin.actionCallback("stop");
+diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionPlugin.java b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionPlugin.java
+index ce25ddf..f861ab5 100644
+--- a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionPlugin.java
++++ b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionPlugin.java
+@@ -30,10 +30,52 @@ import org.json.JSONObject;
+ @CapacitorPlugin(name = "MediaSession")
+ public class MediaSessionPlugin extends Plugin {
+ 
++    /** Implemented by hosts whose hidden WebView can suspend media callbacks. */
++    public interface MediaPlaybackHost {
++        void onMediaSessionAction();
++        void onMediaSessionPlaybackStateChanged(boolean playing);
++    }
++
++    private static MediaSessionPlugin activeInstance;
++
+     private final String pluginVersion = "8.0.29";
+ 
+     private static final String TAG = "CapgoMediaSession";
+-
++
++    @Override
++    protected void handleOnDestroy() {
++        stopMediaService();
++        if (activeInstance == this) {
++            activeInstance = null;
++        }
++        super.handleOnDestroy();
++    }
++
++    public static void emitFavoriteAction() {
++        if (activeInstance != null) {
++            activeInstance.actionCallback("favorite");
++        }
++    }
++
++    public boolean isFavoriteActionEnabled() {
++        return hasActionHandler("favorite");
++    }
++
++    public boolean isFavoriteActive() {
++        return favoriteActive;
++    }
++
++    public void setFavoriteActive(boolean favoriteActive) {
++        if (this.favoriteActive != favoriteActive) {
++            this.favoriteActive = favoriteActive;
++            if (service != null) {
++                service.updateFavoriteAction(favoriteActive);
++            }
++        }
++    }
++
++    private boolean favoriteActive = false;
++
+     private boolean startServiceOnlyDuringPlayback = true;
+ 
+     private String title = "";
+@@ -74,6 +116,7 @@ public class MediaSessionPlugin extends Plugin {
+     @Override
+     public void load() {
+         super.load();
++        activeInstance = this;
+ 
+         String foregroundServiceConfig = getConfig().getString("foregroundService", "");
+         if ("always".equals(foregroundServiceConfig)) {
+@@ -221,6 +264,12 @@ public class MediaSessionPlugin extends Plugin {
+     @PluginMethod
+     public void setPlaybackState(PluginCall call) {
+         playbackState = call.getString("playbackState", playbackState);
++        final boolean playing = "playing".equals(playbackState);
++        getBridge().getWebView().post(() -> {
++            if (getBridge().getWebView() instanceof MediaPlaybackHost) {
++                ((MediaPlaybackHost) getBridge().getWebView()).onMediaSessionPlaybackStateChanged(playing);
++            }
++        });
+-
++
+         boolean playbackActive = isPlaybackActive();
+         if (startServiceOnlyDuringPlayback && service == null && playbackActive) {
+@@ -258,6 +307,18 @@ public class MediaSessionPlugin extends Plugin {
+         }
+     }
+ 
++    @PluginMethod
++    public void removeActionHandler(PluginCall call) {
++        String action = call.getString("action");
++        if (action != null) {
++            actionHandlers.remove(action);
++            if (service != null) {
++                service.updatePossibleActions();
++            }
++        }
++        call.resolve();
++    }
++
+     public boolean hasActionHandler(String action) {
+         PluginCall handler = actionHandlers.get(action);
+         return handler != null && !PluginCall.CALLBACK_ID_DANGLING.equals(handler.getCallbackId());
+@@ -271,12 +332,25 @@ public class MediaSessionPlugin extends Plugin {
+         PluginCall handler = actionHandlers.get(action);
+         if (handler != null && !PluginCall.CALLBACK_ID_DANGLING.equals(handler.getCallbackId())) {
+             data.put("action", action);
+-            handler.resolve(data);
++            // Wake the playback host before dispatching to JavaScript. A paused
++            // hidden WebView can otherwise leave Play queued until app reopen.
++            getBridge().getWebView().post(() -> {
++                if (getBridge().getWebView() instanceof MediaPlaybackHost) {
++                    ((MediaPlaybackHost) getBridge().getWebView()).onMediaSessionAction();
++                }
++                handler.resolve(data);
++            });
+         } else {
+             Log.d(TAG, "No handler for action " + action);
+         }
+     }
+ 
++    @PluginMethod
++    public void setFavoriteState(PluginCall call) {
++        setFavoriteActive(call.getBoolean("favorite", false));
++        call.resolve();
++    }
++
+     @PluginMethod
+     public void getPluginVersion(final PluginCall call) {
+         try {
+diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
+index e2c1f05..95b3ed0 100644
+--- a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
++++ b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
+@@ -11,6 +11,8 @@ import android.graphics.Bitmap;
+ import android.os.Binder;
+ import android.os.Build;
+ import android.os.IBinder;
++import android.os.Handler;
++import android.os.Looper;
+ import android.support.v4.media.MediaMetadataCompat;
+ import android.support.v4.media.session.MediaSessionCompat;
+ import android.support.v4.media.session.PlaybackStateCompat;
+@@ -40,19 +42,20 @@ public class MediaSessionService extends Service {
+     private final Map<String, NotificationCompat.Action> notificationActions = new HashMap<>();
+     private final Map<String, Long> playbackStateActions = new HashMap<>();
+     private final String[] possibleActions = {
+-        "previoustrack",
+-        "seekbackward",
++        "nexttrack",
+         "play",
+         "pause",
+-        "seekforward",
+-        "nexttrack",
++        "previoustrack",
++        "favorite",
+         "seekto",
+         "stop"
+     };
+     private final Set<String> possibleCompactViewActions = new HashSet<>(
+-        Arrays.asList("previoustrack", "play", "pause", "nexttrack", "stop")
++        Arrays.asList("nexttrack", "play", "pause", "previoustrack")
+     );
+ 
++    private boolean favoriteActive = false;
++
+     private int playbackState = PlaybackStateCompat.STATE_NONE;
+     private String title = "";
+     private String artist = "";
+@@ -66,6 +69,30 @@ public class MediaSessionService extends Service {
+     private boolean playbackStateUpdate = false;
+     private boolean mediaMetadataUpdate = false;
+     private boolean notificationUpdate = false;
++    private boolean foregroundStarted = false;
++    private final Handler notificationHandler = new Handler(Looper.getMainLooper());
++    private final Runnable maintainPlaybackNotification = new Runnable() {
++        @Override public void run() {
++            if (playbackState != PlaybackStateCompat.STATE_PLAYING || !foregroundStarted || mediaSession == null) return;
++            // This runs natively: WebView timers may be suspended while hidden.
++            if (!mediaSession.isActive()) mediaSession.setActive(true);
++            if (notificationManager != null && notificationBuilder != null) {
++                boolean posted = false;
++                for (android.service.notification.StatusBarNotification entry : notificationManager.getActiveNotifications()) {
++                    if (entry.getId() == NOTIFICATION_ID && entry.getTag() == null) { posted = true; break; }
++                }
++                if (!posted) {
++                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
++                        startForeground(NOTIFICATION_ID, notificationBuilder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
++                    } else {
++                        startForeground(NOTIFICATION_ID, notificationBuilder.build());
++                    }
++                    Log.i(TAG, "Restored active playback notification while app is backgrounded");
++                }
++            }
++            notificationHandler.postDelayed(this, 5_000);
++        }
++    };
+ 
+     private MediaSessionPlugin plugin;
+ 
+@@ -119,6 +146,8 @@ public class MediaSessionService extends Service {
+         notificationBuilder = new NotificationCompat.Builder(this, CHANNEL_ID)
+             .setStyle(notificationStyle)
+             .setSmallIcon(R.drawable.ic_baseline_volume_up_24)
++            .setOnlyAlertOnce(true)
++            .setSilent(true)
+             .setContentIntent(
+                 PendingIntent.getActivity(
+                     getApplicationContext(),
+@@ -134,6 +163,7 @@ public class MediaSessionService extends Service {
+         } else {
+             startForeground(NOTIFICATION_ID, notificationBuilder.build());
+         }
++        foregroundStarted = true;
+ 
+         notificationActions.put(
+             "play",
+@@ -142,7 +172,7 @@ public class MediaSessionService extends Service {
+                 "Play",
+                 MediaButtonReceiver.buildMediaButtonPendingIntent(
+                     this,
+-                    PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_PLAY
++                    PlaybackStateCompat.ACTION_PLAY
+                 )
+             )
+         );
+@@ -153,7 +183,7 @@ public class MediaSessionService extends Service {
+                 "Pause",
+                 MediaButtonReceiver.buildMediaButtonPendingIntent(
+                     this,
+-                    PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_PAUSE
++                    PlaybackStateCompat.ACTION_PAUSE
+                 )
+             )
+         );
+@@ -197,6 +227,10 @@ public class MediaSessionService extends Service {
+                 MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_STOP)
+             )
+         );
++        if (plugin != null) {
++            favoriteActive = plugin.isFavoriteActive();
++        }
++        notificationActions.put("favorite", buildFavoriteAction(favoriteActive));
+ 
+         playbackStateActions.put("previoustrack", PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS);
+         playbackStateActions.put("seekbackward", PlaybackStateCompat.ACTION_REWIND);
+@@ -208,17 +242,84 @@ public class MediaSessionService extends Service {
+         playbackStateActions.put("stop", PlaybackStateCompat.ACTION_STOP);
+     }
+ 
++    private NotificationCompat.Action buildFavoriteAction(boolean active) {
++        return new NotificationCompat.Action(
++            active ? R.drawable.ic_baseline_star_24 : R.drawable.ic_baseline_star_border_24,
++            active ? "Unfavorite" : "Favorite",
++            PendingIntent.getBroadcast(
++                this,
++                2,
++                new Intent(this, FavoriteMediaReceiver.class),
++                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
++            )
++        );
++    }
++
++    public void updateFavoriteAction(boolean active) {
++        favoriteActive = active;
++        notificationActions.put("favorite", buildFavoriteAction(active));
++        possibleActionsUpdate = true;
++        update();
++    }
++
+     public void destroy() {
++        notificationHandler.removeCallbacks(maintainPlaybackNotification);
+         stopForeground(true);
++        foregroundStarted = false;
+         stopSelf();
+     }
+ 
++    @Override
++    public void onDestroy() {
++        notificationHandler.removeCallbacks(maintainPlaybackNotification);
++        if (mediaSession != null) {
++            mediaSession.setActive(false);
++            mediaSession.release();
++            mediaSession = null;
++        }
++        super.onDestroy();
++    }
++
++    @Override
++    public void onTaskRemoved(Intent rootIntent) {
++        // Removing the app from Recents is an explicit stop, unlike Home or
++        // screen lock. Finish the activity so its WebView/media are destroyed.
++        if (plugin != null && plugin.getActivity() != null) {
++            android.app.Activity activity = plugin.getActivity();
++            activity.runOnUiThread(activity::finishAndRemoveTask);
++        }
++        destroy();
++        super.onTaskRemoved(rootIntent);
++    }
++
+     @Override
+     public int onStartCommand(Intent intent, int flags, int startId) {
++        if (!foregroundStarted) {
++            // startForegroundService must be promoted immediately, even if the
++            // WebView/plugin binding is delayed while the app leaves PiP.
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++                NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Playback", NotificationManager.IMPORTANCE_LOW);
++                notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
++                if (notificationManager != null) notificationManager.createNotificationChannel(channel);
++            }
++            NotificationCompat.Builder starting = new NotificationCompat.Builder(this, CHANNEL_ID)
++                .setSmallIcon(R.drawable.ic_baseline_volume_up_24)
++                .setContentTitle("TMS")
++                .setContentText("Preparing playback")
++                .setOnlyAlertOnce(true);
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
++                startForeground(NOTIFICATION_ID, starting.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
++            } else {
++                startForeground(NOTIFICATION_ID, starting.build());
++            }
++            foregroundStarted = true;
++        }
+         if (mediaSession != null) {
+             MediaButtonReceiver.handleIntent(mediaSession, intent);
+         }
+-        return super.onStartCommand(intent, flags, startId);
++        // Playback belongs to the current app process; don't resurrect an
++        // empty media service after the user or OS kills it.
++        return START_NOT_STICKY;
+     }
+ 
+     public void setPlaybackState(int newPlaybackState) {
+@@ -226,6 +327,11 @@ public class MediaSessionService extends Service {
+             playbackState = newPlaybackState;
+             playbackStateUpdate = true;
+             possibleActionsUpdate = true;
++            notificationUpdate = true;
++        }
++        notificationHandler.removeCallbacks(maintainPlaybackNotification);
++        if (newPlaybackState == PlaybackStateCompat.STATE_PLAYING) {
++            notificationHandler.postDelayed(maintainPlaybackNotification, 5_000);
+         }
+     }
+ 
+@@ -318,7 +424,16 @@ public class MediaSessionService extends Service {
+             }
+ 
+             if (playbackStateBuilder != null) {
+-                playbackStateBuilder.setActions(activePlaybackStateActions);
++                playbackStateBuilder = new PlaybackStateCompat.Builder().setActions(activePlaybackStateActions);
++                if (plugin != null && plugin.hasActionHandler("favorite")) {
++                    playbackStateBuilder.addCustomAction(
++                        new PlaybackStateCompat.CustomAction.Builder(
++                            "favorite",
++                            favoriteActive ? "Unfavorite" : "Favorite",
++                            favoriteActive ? R.drawable.ic_baseline_star_24 : R.drawable.ic_baseline_star_border_24
++                        ).build()
++                    );
++                }
+             }
+             if (notificationStyle != null) {
+                 if (compactNotificationActionIndicesIndex > 0) {
+@@ -336,7 +451,7 @@ public class MediaSessionService extends Service {
+         }
+ 
+         if (playbackStateUpdate && playbackStateBuilder != null) {
+-            playbackStateBuilder.setState(playbackState, position, playbackSpeed);
++            playbackStateBuilder.setState(playbackState, position, playbackState == PlaybackStateCompat.STATE_PLAYING ? playbackSpeed : 0.0F);
+             mediaSession.setPlaybackState(playbackStateBuilder.build());
+             playbackStateUpdate = false;
+         }
+@@ -353,7 +468,8 @@ public class MediaSessionService extends Service {
+         }
+ 
+         if (notificationUpdate && notificationBuilder != null && notificationManager != null) {
+-            notificationBuilder.setContentTitle(title).setContentText(artist + " - " + album).setLargeIcon(artwork);
++            notificationBuilder.setContentTitle(title).setContentText(artist + " - " + album).setLargeIcon(artwork)
++                .setOngoing(playbackState == PlaybackStateCompat.STATE_PLAYING);
+             notificationManager.notify(NOTIFICATION_ID, notificationBuilder.build());
+             notificationUpdate = false;
+         }
+diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/res/drawable/ic_baseline_star_24.xml b/node_modules/@capgo/capacitor-media-session/android/src/main/res/drawable/ic_baseline_star_24.xml
+new file mode 100644
+index 0000000..52d8bf9
+--- /dev/null
++++ b/node_modules/@capgo/capacitor-media-session/android/src/main/res/drawable/ic_baseline_star_24.xml
+@@ -0,0 +1,9 @@
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp"
++    android:height="24dp"
++    android:viewportWidth="24"
++    android:viewportHeight="24">
++    <path
++        android:fillColor="#FFFFFFFF"
++        android:pathData="M12,17.27L18.18,21l-1.64,-7.03L22,9.24l-7.19,-0.61L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21z" />
++</vector>
+diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/res/drawable/ic_baseline_star_border_24.xml b/node_modules/@capgo/capacitor-media-session/android/src/main/res/drawable/ic_baseline_star_border_24.xml
+new file mode 100644
+index 0000000..cd2605e
+--- /dev/null
++++ b/node_modules/@capgo/capacitor-media-session/android/src/main/res/drawable/ic_baseline_star_border_24.xml
+@@ -0,0 +1,9 @@
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp"
++    android:height="24dp"
++    android:viewportWidth="24"
++    android:viewportHeight="24">
++    <path
++        android:fillColor="#FFFFFFFF"
++        android:pathData="M22,9.24l-7.19,-0.62L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21 12,17.27 18.18,21l-1.63,-7.03L22,9.24zM12,15.4l-3.76,2.27 1,-4.28 -3.32,-2.88 4.38,-0.38L12,6.1l1.71,4.04 4.38,0.38 -3.32,2.88 1,4.28L12,15.4z" />
++</vector>
+diff --git a/node_modules/@capgo/capacitor-media-session/dist/esm/definitions.d.ts b/node_modules/@capgo/capacitor-media-session/dist/esm/definitions.d.ts
+index b090867..3108307 100644
+--- a/node_modules/@capgo/capacitor-media-session/dist/esm/definitions.d.ts
++++ b/node_modules/@capgo/capacitor-media-session/dist/esm/definitions.d.ts
+@@ -4,7 +4,7 @@ export interface MediaImage {
+     type?: string;
+ }
+ export type MediaSessionPlaybackState = 'none' | 'paused' | 'playing';
+-export type MediaSessionAction = 'play' | 'pause' | 'seekbackward' | 'seekforward' | 'previoustrack' | 'nexttrack' | 'seekto' | 'stop';
++export type MediaSessionAction = 'play' | 'pause' | 'seekbackward' | 'seekforward' | 'previoustrack' | 'nexttrack' | 'seekto' | 'stop' | 'favorite';
+ export interface MetadataOptions {
+     album?: string;
+     artist?: string;

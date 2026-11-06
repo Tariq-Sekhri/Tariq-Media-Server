@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "TMS Cookie Sync",
+  "version": "1.0",
+  "description": "Automatically syncs YouTube cookies to Tariq Media Server.",
+  "permissions": ["cookies", "alarms"],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

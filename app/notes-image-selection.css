@@ -1,0 +1,4 @@
+.rich-content-editable img.notes-image-selected {
+  outline: 3px solid #58a6ff;
+  outline-offset: 3px;
+}

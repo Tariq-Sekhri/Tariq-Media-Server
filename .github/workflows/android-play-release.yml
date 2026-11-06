@@ -1,0 +1,106 @@
+name: Android Internal testing release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tms-play-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      version_code: ${{ steps.version.outputs.code }}
+      release_name: ${{ steps.version.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Set unique Android version
+        id: version
+        shell: bash
+        run: |
+          echo "code=$((101000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+          BASE_VERSION=$(node -p 'require("./package.json").version')
+          echo "name=${BASE_VERSION}-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+      - run: npm ci
+      # Offline tagging, playlists and UI parity are checked before shipping.
+      - run: npm run test:unit
+      - name: Build and sync Android web assets
+        env:
+          TMS_CAPACITOR_SERVER_URL: ${{ secrets.TMS_CAPACITOR_SERVER_URL }}
+        run: |
+          test -n "$TMS_CAPACITOR_SERVER_URL"
+          npm run build
+          npx cap sync android
+      - name: Restore upload signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload.jks"
+      - name: Build signed bundle
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: >-
+          bash ./gradlew :app:bundleRelease
+          -PciVersionCode=${{ steps.version.outputs.code }}
+          -PciVersionName=${{ steps.version.outputs.name }}
+          --console=plain
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tms-play-bundle
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: tms-play-bundle
+          path: play-bundle
+      - id: google-auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: project-33477e16-5086-4c11-933
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+      - name: Publish to Internal testing
+        env:
+          PLAY_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          VERSION_CODE: ${{ needs.build.outputs.version_code }}
+          RELEASE_NAME: ${{ needs.build.outputs.release_name }}
+        run: python3 scripts/publish-play.py ca.sekhrit.tms play-bundle/app-release.aab "$VERSION_CODE" "$RELEASE_NAME"

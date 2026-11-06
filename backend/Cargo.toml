@@ -1,0 +1,29 @@
+[package]
+name = "tms-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = { version = "0.8", features = ["multipart"] }
+bcrypt = "0.17"
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_RemoteDesktop", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "signal", "io-util", "time"] }
+time = "0.3"
+tower-http = { version = "0.6", features = ["catch-panic", "compression-gzip", "cors", "fs", "set-header", "trace"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time"] }
+walkdir = "2"
+urlencoding = "2"
+uuid = { version = "1", features = ["v4"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+image = "0.25.10"
+
+[target.'cfg(windows)'.dependencies]
+junction = "2"
+raw-window-handle = "0.6"
+rfd = "0.15"
