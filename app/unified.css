@@ -6713,8 +6713,11 @@ body .discover-title-dialog .discover-dialog-header { position: static; flex: 0 
 .media-management[open] > summary > svg { transform: rotate(90deg); }
 .card-menu > .danger { border-top: 1px solid #65414d; margin-top: 8px; }
 @media (max-width: 760px) {
- .mobile-navigation-shell { display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 110; background: #12151c; padding-bottom: env(safe-area-inset-bottom,0px); border-top: 1px solid #36313f; height: 64px; box-sizing: content-box; }
- .mobile-navigation-shell .mobile-navigation { position: static !important; display: flex; flex: 1; width: 0; min-width: 0; height: 64px; padding: 0 !important; border: 0; margin: 0; gap: 0; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; mask-image: none !important; -webkit-mask-image: none !important; box-shadow: none !important; }
+ body:has(.mobile-navigation-shell) { --mobile-navigation-height: 64px; --mobile-navigation-space: calc(var(--mobile-navigation-height) + 1px + env(safe-area-inset-bottom, 0px)); }
+ body:has(.mobile-navigation-shell) .miniplayer:not(.expanded) { bottom: var(--mobile-navigation-space); }
+ body:has(.mobile-navigation-shell):has(.miniplayer) .app-shell { padding-bottom: calc(112px + var(--mobile-navigation-space)); }
+ .mobile-navigation-shell { display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 110; background: #12151c; padding-bottom: env(safe-area-inset-bottom,0px); border-top: 1px solid #36313f; height: var(--mobile-navigation-height, 64px); box-sizing: content-box; }
+ .mobile-navigation-shell .mobile-navigation { position: static !important; display: flex; flex: 1; width: 0; min-width: 0; height: var(--mobile-navigation-height, 64px); padding: 0 !important; border: 0; margin: 0; gap: 0; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; mask-image: none !important; -webkit-mask-image: none !important; box-shadow: none !important; }
  .mobile-navigation-shell .mobile-navigation > a { flex: 1 0 64px !important; min-width: 64px !important; width: auto; box-sizing: border-box; scroll-snap-align: start; scroll-snap-stop: always; border: 2px solid #12151c !important; border-radius: 10px; padding: 4px 0; font-size: 12px; }
  .nav-page { flex: 0 0 48px; width: 48px; height: 64px; min-height: 48px; border: 0; background: #211c2e; color: #e4d9ff; font-size: 30px; padding: 0; }
  body:has(.search input:focus) .mobile-navigation-shell { display: none; }
