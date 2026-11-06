@@ -1,7 +1,8 @@
 import type { CapacitorConfig } from "@capacitor/cli";
-import { resolveCapacitorServerUrl } from "./scripts/capacitor-server-url.mjs";
+import { resolveCapacitorLocalServerUrl, resolveCapacitorServerUrl, resolveCapacitorTailscaleServerUrl } from "./scripts/capacitor-server-url.mjs";
 
 const serverUrl = resolveCapacitorServerUrl();
+const localServerUrl = resolveCapacitorLocalServerUrl();
 
 const config: CapacitorConfig = {
   appId: "ca.sekhrit.tms",
@@ -12,6 +13,9 @@ const config: CapacitorConfig = {
   webDir: "dist/client",
   android: {
     allowMixedContent: true,
+  },
+  plugins: {
+    TmsConnection: { localUrl: localServerUrl, tailscaleUrl: resolveCapacitorTailscaleServerUrl() },
   },
   server: {
     // Bundle the same React library and player for server-free startup.

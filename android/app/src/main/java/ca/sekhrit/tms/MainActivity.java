@@ -80,6 +80,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(TmsPipPlugin.class);
         registerPlugin(TmsOfflinePlugin.class);
         registerPlugin(TmsShortcutsPlugin.class);
+        config = TmsConnectionActivity.selectedConfig(this);
         super.load();
     }
 
