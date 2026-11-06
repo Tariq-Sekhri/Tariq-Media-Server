@@ -1,5 +1,7 @@
 # Browser validation
 
+Use browser testing or browser automation only when the user explicitly asks for it. Do not automatically open the browser to validate routine code changes. Use focused non-browser checks appropriate to the change and report any validation limitations.
+
 When validating browser behavior, use the user's real browser and existing signed-in session. Do not use the inbuilt browser or collaborative preview for validation. The real browser is already logged into the user's account, so validation should exercise that account and session.
 
 If the real browser cannot be accessed, report that limitation instead of switching to the inbuilt browser.
