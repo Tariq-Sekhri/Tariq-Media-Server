@@ -84,3 +84,6 @@ gha-creds-*.json
 .idea/
 android/.idea/
 artifacts/
+/AGENTS.md
+/CLAUDE.md
+/private/
