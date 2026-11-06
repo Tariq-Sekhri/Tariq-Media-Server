@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import MagnetDownloader from "./MagnetDownloader";
 import TagInput from "./TagInput";
 import { authFetch } from "./lib/auth";
@@ -99,16 +99,17 @@ export default function ServerDownloadDialog({
   const [selectedDestination, setSelectedDestination] = useState(destination);
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [busy, setBusy] = useState(false);
+  const [refreshingCookies, setRefreshingCookies] = useState(false);
   const [error, setError] = useState("");
   const [downloadTags, setDownloadTags] = useState<string[]>([]);
   const [putInFolder, setPutInFolder] = useState(false);
   const [folderMode, setFolderMode] = useState<"new" | "existing">("new");
   const [newFolderName, setNewFolderName] = useState("");
-  const [selectedFolderPath, setSelectedFolderPath] = useState("");
+  const [preferredFolderPath, setSelectedFolderPath] = useState("");
   const [saveAsPlaylist, setSaveAsPlaylist] = useState(false);
   const [playlistMode, setPlaylistMode] = useState<"new" | "existing">("new");
   const [newPlaylistName, setNewPlaylistName] = useState("");
-  const [selectedPlaylistId, setSelectedPlaylistId] = useState("");
+  const [preferredPlaylistId, setSelectedPlaylistId] = useState("");
   const [showAllPreviewItems, setShowAllPreviewItems] = useState(false);
   const normalizedDestinations = useMemo(() => {
     const libraryPath = destination.split("/")[0];
@@ -146,26 +147,16 @@ export default function ServerDownloadDialog({
   const trimmedUrl = url.trim();
   const isMagnetLink = trimmedUrl.toLowerCase().startsWith("magnet:?");
 
-  const lastInitializedInspection = useRef<Inspection | null>(null);
+  const selectedFolderPath = folderOptions.includes(preferredFolderPath)
+    ? preferredFolderPath : folderOptions[0] ?? selectedDestination;
+  const selectedPlaylistId = playlistOptions.some((playlist) => playlist.id === preferredPlaylistId)
+    ? preferredPlaylistId : playlistOptions[0]?.id ?? "";
 
-  useEffect(() => {
-    if (!inspection) {
-      lastInitializedInspection.current = null;
-      return;
-    }
-    if (inspection === lastInitializedInspection.current) return;
-    lastInitializedInspection.current = inspection;
-
-    setNewFolderName(inspection.title);
-    setNewPlaylistName(inspection.title);
-    setPutInFolder(false);
-    setFolderMode("new");
-    setSelectedFolderPath(folderOptions[0] ?? selectedDestination);
-    setSaveAsPlaylist(false);
-    setPlaylistMode("new");
-    setSelectedPlaylistId(playlistOptions[0]?.id ?? "");
-    setShowAllPreviewItems(false);
-  }, [folderOptions, inspection, playlistOptions, selectedDestination]);
+  const acceptInspection = (result: Inspection) => {
+    setInspection(result);
+    setNewFolderName((current) => current || result.title);
+    setNewPlaylistName((current) => current || result.title);
+  };
 
   if (destinationType === "movies_tv") {
     return (
@@ -190,19 +181,8 @@ export default function ServerDownloadDialog({
 
   const resetInspection = () => {
     setInspection(null);
-    setDownloadTags([]);
-    setPutInFolder(false);
-    setFolderMode("new");
-    setNewFolderName("");
-    setSelectedFolderPath("");
-    setSaveAsPlaylist(false);
-    setPlaylistMode("new");
-    setNewPlaylistName("");
-    setSelectedPlaylistId("");
     setShowAllPreviewItems(false);
   };
-
-  const [refreshingCookies, setRefreshingCookies] = useState(false);
 
   const isCookieOrAuthError = (msg: string) => {
     const lower = msg.toLowerCase();
@@ -238,7 +218,7 @@ export default function ServerDownloadDialog({
       });
       const inspectResult = (await inspectRes.json()) as Inspection & { message?: string };
       if (!inspectRes.ok) throw new Error(inspectResult.message || "Could not inspect this URL.");
-      setInspection(inspectResult);
+      acceptInspection(inspectResult);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not refresh cookies.");
     } finally {
@@ -260,7 +240,7 @@ export default function ServerDownloadDialog({
       });
       const result = await response.json() as Inspection & { message?: string };
       if (!response.ok) throw new Error(result.message || "Could not inspect this URL.");
-      setInspection(result);
+      acceptInspection(result);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not inspect this URL.");
     } finally {
@@ -280,7 +260,7 @@ export default function ServerDownloadDialog({
         return;
       }
     }
-    if (saveAsPlaylist && isMultiItem) {
+    if (saveAsPlaylist) {
       if (playlistMode === "new" && !newPlaylistName.trim()) {
         setError("Enter a playlist name.");
         return;
@@ -306,7 +286,7 @@ export default function ServerDownloadDialog({
           body.folder_path = selectedFolderPath;
         }
       }
-      if (saveAsPlaylist && isMultiItem) {
+      if (saveAsPlaylist) {
         if (playlistMode === "new") {
           body.new_playlist_name = newPlaylistName.trim();
         } else {
@@ -415,134 +395,130 @@ export default function ServerDownloadDialog({
                     )}
                   </div>
                 )}
-                <div className="server-download-organize">
-                  <div className="field">
-                    <span>Tags when complete</span>
-                    <TagInput value={downloadTags} onChange={setDownloadTags} allTags={allTags} />
-                    <small>These tags will be applied to every downloaded file.</small>
-                  </div>
-                  <label className="field server-download-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={putInFolder}
-                      onChange={(event) => setPutInFolder(event.target.checked)}
-                    />
-                    <span>Put in folder</span>
-                  </label>
-                  {putInFolder && (
-                    <fieldset className="server-download-playlist-options">
-                      <legend>Folder</legend>
-                      <label className="server-download-radio">
-                        <input
-                          type="radio"
-                          name="download-folder-mode"
-                          checked={folderMode === "new"}
-                          onChange={() => setFolderMode("new")}
-                        />
-                        <span>Create new folder</span>
-                      </label>
-                      {folderMode === "new" && (
-                        <label className="field">
-                          <span>Name</span>
-                          <input
-                            value={newFolderName}
-                            onChange={(event) => setNewFolderName(event.target.value)}
-                            placeholder="Folder name"
-                            maxLength={80}
-                          />
-                        </label>
-                      )}
-                      <label className="server-download-radio">
-                        <input
-                          type="radio"
-                          name="download-folder-mode"
-                          checked={folderMode === "existing"}
-                          onChange={() => setFolderMode("existing")}
-                        />
-                        <span>Use existing folder</span>
-                      </label>
-                      {folderMode === "existing" && (
-                        <label className="field">
-                          <span>Folder</span>
-                          <select
-                            value={selectedFolderPath}
-                            onChange={(event) => setSelectedFolderPath(event.target.value)}
-                          >
-                            {folderOptions.map((path) => (
-                              <option key={path} value={path}>{path}</option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
-                    </fieldset>
-                  )}
-                  {isMultiItem && (
-                    <>
-                      <label className="field server-download-checkbox">
-                        <input
-                          type="checkbox"
-                          checked={saveAsPlaylist}
-                          onChange={(event) => setSaveAsPlaylist(event.target.checked)}
-                        />
-                        <span>Save as playlist</span>
-                      </label>
-                      {saveAsPlaylist && (
-                        <fieldset className="server-download-playlist-options">
-                          <legend>Playlist</legend>
-                          <label className="server-download-radio">
-                            <input
-                              type="radio"
-                              name="download-playlist-mode"
-                              checked={playlistMode === "new"}
-                              onChange={() => setPlaylistMode("new")}
-                            />
-                            <span>Create new playlist</span>
-                          </label>
-                          {playlistMode === "new" && (
-                            <label className="field">
-                              <span>Name</span>
-                              <input
-                                value={newPlaylistName}
-                                onChange={(event) => setNewPlaylistName(event.target.value)}
-                                placeholder="Playlist name"
-                                maxLength={80}
-                              />
-                            </label>
-                          )}
-                          <label className="server-download-radio">
-                            <input
-                              type="radio"
-                              name="download-playlist-mode"
-                              checked={playlistMode === "existing"}
-                              onChange={() => setPlaylistMode("existing")}
-                            />
-                            <span>Add to existing playlist</span>
-                          </label>
-                          {playlistMode === "existing" && (
-                            <label className="field">
-                              <span>Playlist</span>
-                              <select
-                                value={selectedPlaylistId}
-                                onChange={(event) => setSelectedPlaylistId(event.target.value)}
-                                disabled={!playlistOptions.length}
-                              >
-                                {!playlistOptions.length ? (
-                                  <option value="">No playlists yet</option>
-                                ) : (
-                                  playlistOptions.map((playlist) => (
-                                    <option key={playlist.id} value={playlist.id}>{playlist.name}</option>
-                                  ))
-                                )}
-                              </select>
-                            </label>
-                          )}
-                        </fieldset>
-                      )}
-                    </>
-                  )}
-                </div>
               </>
             )}
+            <div className="server-download-organize">
+              <div className="field">
+                <span>Tags when complete</span>
+                <TagInput value={downloadTags} onChange={setDownloadTags} allTags={allTags} />
+                <small>These tags will be applied to every downloaded file.</small>
+              </div>
+              <label className="field server-download-checkbox">
+                <input
+                  type="checkbox"
+                  checked={putInFolder}
+                  onChange={(event) => setPutInFolder(event.target.checked)}
+                />
+                <span>Put in folder</span>
+              </label>
+              {putInFolder && (
+                <fieldset className="server-download-playlist-options">
+                  <legend>Folder</legend>
+                  <label className="server-download-radio">
+                    <input
+                      type="radio"
+                      name="download-folder-mode"
+                      checked={folderMode === "new"}
+                      onChange={() => setFolderMode("new")}
+                    />
+                    <span>Create new folder</span>
+                  </label>
+                  {folderMode === "new" && (
+                    <label className="field">
+                      <span>Name</span>
+                      <input
+                        value={newFolderName}
+                        onChange={(event) => setNewFolderName(event.target.value)}
+                        placeholder="Folder name"
+                        maxLength={80}
+                      />
+                    </label>
+                  )}
+                  <label className="server-download-radio">
+                    <input
+                      type="radio"
+                      name="download-folder-mode"
+                      checked={folderMode === "existing"}
+                      onChange={() => setFolderMode("existing")}
+                    />
+                    <span>Use existing folder</span>
+                  </label>
+                  {folderMode === "existing" && (
+                    <label className="field">
+                      <span>Folder</span>
+                      <select
+                        value={selectedFolderPath}
+                        onChange={(event) => setSelectedFolderPath(event.target.value)}
+                      >
+                        {folderOptions.map((path) => (
+                          <option key={path} value={path}>{path}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </fieldset>
+              )}
+              <label className="field server-download-checkbox">
+                <input
+                  type="checkbox"
+                  checked={saveAsPlaylist}
+                  onChange={(event) => setSaveAsPlaylist(event.target.checked)}
+                />
+                <span>Add to playlist</span>
+              </label>
+              {saveAsPlaylist && (
+                <fieldset className="server-download-playlist-options">
+                  <legend>Playlist</legend>
+                  <label className="server-download-radio">
+                    <input
+                      type="radio"
+                      name="download-playlist-mode"
+                      checked={playlistMode === "new"}
+                      onChange={() => setPlaylistMode("new")}
+                    />
+                    <span>Create new playlist</span>
+                  </label>
+                  {playlistMode === "new" && (
+                    <label className="field">
+                      <span>Name</span>
+                      <input
+                        value={newPlaylistName}
+                        onChange={(event) => setNewPlaylistName(event.target.value)}
+                        placeholder="Playlist name"
+                        maxLength={80}
+                      />
+                    </label>
+                  )}
+                  <label className="server-download-radio">
+                    <input
+                      type="radio"
+                      name="download-playlist-mode"
+                      checked={playlistMode === "existing"}
+                      onChange={() => setPlaylistMode("existing")}
+                    />
+                    <span>Add to existing playlist</span>
+                  </label>
+                  {playlistMode === "existing" && (
+                    <label className="field">
+                      <span>Playlist</span>
+                      <select
+                        value={selectedPlaylistId}
+                        onChange={(event) => setSelectedPlaylistId(event.target.value)}
+                        disabled={!playlistOptions.length}
+                      >
+                        {!playlistOptions.length ? (
+                          <option value="">No playlists yet</option>
+                        ) : (
+                          playlistOptions.map((playlist) => (
+                            <option key={playlist.id} value={playlist.id}>{playlist.name}</option>
+                          ))
+                        )}
+                      </select>
+                    </label>
+                  )}
+                </fieldset>
+              )}
+            </div>
             <div className="modal-actions">
               <button type="button" onClick={onClose}>Cancel</button>
               {!inspection
