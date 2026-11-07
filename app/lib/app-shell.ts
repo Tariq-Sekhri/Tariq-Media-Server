@@ -93,13 +93,11 @@ export const appShellEnabled = () => enabled;
 export const useAppShell = () => useSyncExternalStore(subscribeAppShell, appShellSnapshot, () => SERVER_STATE);
 export const useWatchMode = (): WatchMode => useAppShell().watch?.mode ?? "full";
 
-// Navigate between Library and Watch without a document load when the shell
-// is running. Other destinations, and any shell route while nothing is
-// playing, keep the browser's ordinary navigation.
+// Browse and play within the mounted shell, even when nothing is playing.
+// Destinations outside the shell keep the browser's ordinary navigation.
 export function navigateApp(url: string, options: { replace?: boolean } = {}) {
   const target = new URL(url, window.location.href);
-  const inPlace = enabled && target.origin === window.location.origin && isShellPath(target.pathname)
-    && (target.pathname === "/watch" || Boolean(state.watch || state.companion));
+  const inPlace = enabled && target.origin === window.location.origin && isShellPath(target.pathname);
   if (!inPlace) {
     if (options.replace) window.location.replace(target.href);
     else window.location.assign(target.href);

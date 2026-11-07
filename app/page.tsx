@@ -4497,20 +4497,11 @@ export default function Home() {
     return { path: `${path}/${seasons[0].name}`, episodeList: true };
   }, [authoritativeFolder, isTitleFolder, items, libraries]);
 
-  const openFolderDocument = (path: string) => {
-    // Ordinary folders already have a complete URL. Start a real navigation
-    // before React can spend time re-filtering a very large cached library.
-    // The destination restores its own saved sort, tag, and view preferences.
-    if (uploadWorkerCount.current > 0) {
-      // A document navigation would abort every running upload, so browse
-      // in place until the uploads finish.
-      restoreFolderBrowsePrefs(path);
-      setSection("library");
-      setCurrentFolder(path);
-      window.scrollTo(0, 0);
-    } else {
-      navigateApp(`/?folder=${encodeURIComponent(path)}`);
-    }
+  const openFolderInApp = (path: string) => {
+    // The shell restores the destination's saved preferences in place while
+    // keeping a bookmarkable URL and normal back/forward history.
+    navigateApp(`/?folder=${encodeURIComponent(path)}`);
+    window.scrollTo(0, 0);
     void authFetch(`${API_BASE}/api/activity/access`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -4544,7 +4535,7 @@ export default function Home() {
     }
     const path = item.parent ? `${item.parent}/${item.name}` : item.name;
     if (!isTitleFolder(path)) {
-      openFolderDocument(path);
+      openFolderInApp(path);
       return;
     }
     void recordAccess(path, false);
@@ -4572,7 +4563,7 @@ export default function Home() {
   const openFolderFromTree = (folder: MediaItem) => {
     const path = folder.parent ? `${folder.parent}/${folder.name}` : folder.name;
     if (!isTitleFolder(path)) {
-      openFolderDocument(path);
+      openFolderInApp(path);
       return;
     }
     const destination = resolveFolderDestination(path);

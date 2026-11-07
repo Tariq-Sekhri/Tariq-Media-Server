@@ -18,15 +18,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!inShell) return;
     const stop = startAppShell();
-    // Library links to Watch are ordinary anchors for open-in-new-tab. A
-    // plain click stays in this document so a playing video is not reloaded.
+    // Shell links remain ordinary anchors for open-in-new-tab. A plain click
+    // updates the mounted app without reloading the library or player.
     const openInPlace = (event: MouseEvent) => {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
       if (!(anchor instanceof HTMLAnchorElement) || (anchor.target && anchor.target !== "_self") || anchor.hasAttribute("download")) return;
       const url = new URL(anchor.href);
       if (url.origin !== window.location.origin || !isShellPath(url.pathname)) return;
-      if (url.pathname !== "/watch" && !appShellSnapshot().watch && !appShellSnapshot().companion) return;
       event.preventDefault();
       navigateApp(`${url.pathname}${url.search}`);
     };

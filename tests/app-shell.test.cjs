@@ -165,15 +165,25 @@ test('handing a full Watch page to audio leaves Watch in place', () => {
   assert.deepEqual(s.b.loads, [], 'the audio mini player starts without a page load');
 });
 
-test('library links keep normal navigation unless a video is playing', () => {
+test('library navigation stays in the app without playback and supports back/forward', () => {
   const s = shell('/?folder=Lib');
   s.navigateApp('/?folder=Other');
-  assert.deepEqual(s.b.loads, [['assign', 'http://tms.test/?folder=Other']]);
+  assert.equal(s.b.url(), '/?folder=Other');
+  assert.equal(s.appShellSnapshot().path, '/?folder=Other');
+  assert.equal(s.appShellSnapshot().watch, null);
+  assert.deepEqual(s.b.loads, []);
+  s.b.window.history.back();
+  assert.equal(s.appShellSnapshot().path, '/?folder=Lib');
+  s.b.window.history.forward();
+  assert.equal(s.appShellSnapshot().path, '/?folder=Other');
+  s.navigateApp('/search?q=music');
+  assert.equal(s.appShellSnapshot().path, '/search?q=music');
+  assert.deepEqual(s.b.loads, []);
   s.navigateApp(watchUrl('a'));
   s.minimizeWatch('/?folder=Lib');
   s.navigateApp('/?folder=Other');
   assert.equal(s.b.url(), '/?folder=Other');
-  assert.equal(s.b.loads.length, 1, 'browsing with the mini player open stays in the document');
+  assert.equal(s.b.loads.length, 0, 'browsing with the mini player open stays in the document');
   s.navigateApp('/admin');
   assert.deepEqual(s.b.loads.at(-1), ['assign', 'http://tms.test/admin']);
 });
