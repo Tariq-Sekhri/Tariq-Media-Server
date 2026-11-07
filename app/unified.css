@@ -6827,7 +6827,7 @@ body .discover-title-dialog .discover-dialog-header { position: static; flex: 0 
 
 @media (max-width: 760px) {
  .unified-layout .toolbar > div:first-child { flex: 0 0 auto; width: auto !important; display: flex; gap: 4px; }
- .unified-layout .toolbar .toolbar-queue { font-size: 0 !important; width: 48px; min-width: 48px; height: 48px; padding: 0; display: grid; place-items: center; border-radius: 10px; }
+ .unified-layout .toolbar .toolbar-queue { font-size: 0 !important; width: 48px; min-width: 48px; height: 48px; padding: 0; display: inline-flex; align-items: center; justify-content: center; gap: 0; border-radius: 10px; }
  .unified-layout .toolbar .toolbar-queue .menu-icon { margin: 0; width: 20px; height: 20px; }
  .unified-layout .toolbar .view-tools { flex: 1 1 180px; width: auto !important; min-width: 0; }
  .unified-layout .toolbar .view-tools select { width: 0; min-width: 70px; flex: 1; }
