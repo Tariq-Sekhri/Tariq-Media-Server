@@ -6913,7 +6913,10 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 
 /* Desktop web pass: readable media metadata and a coherent browse rail. */
 @media (min-width: 761px) {
- .unified-layout .hub-folder-rail { width: 248px; padding: 16px 12px; background: #10141a; border-right: 1px solid #292e38; }
+ .unified-layout .content { grid-template-columns: 248px minmax(0, 1fr); column-gap: 22px; }
+ .unified-layout:not(.notes-section) .content { padding-left: 0; }
+ .unified-layout .hub-folder-rail { left: 0; width: 248px; padding: 16px 12px; background: #10141a; border-right: 1px solid #292e38; }
+ .unified-layout.rail-collapsed .library-page-loading { left: 66px; }
  .unified-layout .hub-folder-rail .folder-tree-entry { display: flex; align-items: center; min-height: 40px; }
  .unified-layout .hub-folder-rail .folder-tree-entry > button:not(.folder-tree-expand) { flex: 1; min-width: 0; }
  .unified-layout .hub-folder-rail .folder-tree-expand, .unified-layout .hub-folder-rail .folder-tree-slot { flex: 0 0 28px; width: 28px; min-height: 40px; padding: 0; display: grid; place-items: center; }
