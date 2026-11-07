@@ -6294,8 +6294,8 @@ export default function Home() {
     <main
       className={`app-shell concept-hub unified-layout section-${section} ${activeSearch ? "aggregate-results" : ""} ${railCollapsed ? "rail-collapsed" : ""} ${railDrawerOpen ? "rail-drawer-open" : ""} ${railDrawerOpen || railDrawerVisible ? "rail-drawer-visible" : ""} ${!railDrawerOpen && railDrawerVisible ? "rail-drawer-closing" : ""} ${section === "notes" ? "notes-section" : ""}`}
       onTouchStart={(event) => {
-        // Player gestures, including seeking, must never open the library rail.
-        if (event.target instanceof Element && event.target.closest(".miniplayer")) {
+        // Player gestures and horizontal tag scrolling own their touches.
+        if (event.target instanceof Element && event.target.closest(".miniplayer, .tag-strip")) {
           sidebarSwipeStart.current = null;
           return;
         }

@@ -73,18 +73,33 @@ test('multi-touch, cancelled gestures, and outgoing-track gestures do not skip',
   assert.equal(h.calls.length, 0);
 });
 
-test('sidebar swipe ignores miniplayer touches but retains ordinary navigation swipes', () => {
+test('sidebar swipe ignores player and tag scrolling but retains ordinary navigation swipes', () => {
   const ast = sourceAst('app/page.tsx');
   const shell = find(ast, node => ts.isJsxOpeningElement(node) && node.tagName.getText(ast) === 'main');
   const attribute = name => shell.attributes.properties.find(node => node.name?.text === name).initializer.expression;
-  class Element { constructor(player) { this.player = player; } closest() { return this.player; } }
+  class Element {
+    constructor(ancestorClass) { this.ancestorClass = ancestorClass; }
+    closest(selector) { return selector.split(',').some(part => part.trim() === this.ancestorClass); }
+  }
   const opened = [];
   const context = vm.createContext({ Element, sidebarSwipeStart: { current: null }, performance: { now: () => 1 }, setRailDrawerOpen: value => opened.push(value), railDrawerOpen: false });
   const start = evaluate(attribute('onTouchStart'), ast, context);
   const end = evaluate(attribute('onTouchEnd'), ast, context);
-  for (const player of [true, false]) {
-    start({ target: new Element(player), touches: [{ clientX: 20, clientY: 20 }] });
-    end({ changedTouches: [{ clientX: 120, clientY: 20 }] });
-    assert.equal(opened.length, player ? 0 : 1);
+  for (const ancestor of ['.miniplayer', '.tag-strip']) {
+    for (const delta of [-100, 100]) {
+      context.railDrawerOpen = true;
+      context.sidebarSwipeStart.current = { x: 20, y: 20, time: 1 };
+      start({ target: new Element(ancestor), touches: [{ clientX: 120, clientY: 20 }] });
+      end({ changedTouches: [{ clientX: 120 + delta, clientY: 20 }] });
+      assert.deepEqual(opened, [], `${ancestor} owns swipes in both directions`);
+    }
   }
+  context.railDrawerOpen = false;
+  start({ target: new Element('.content'), touches: [{ clientX: 20, clientY: 20 }] });
+  end({ changedTouches: [{ clientX: 120, clientY: 20 }] });
+  assert.deepEqual(opened, [true]);
+  context.railDrawerOpen = true;
+  start({ target: new Element('.content'), touches: [{ clientX: 120, clientY: 20 }] });
+  end({ changedTouches: [{ clientX: 20, clientY: 20 }] });
+  assert.deepEqual(opened, [true, false]);
 });
