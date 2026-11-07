@@ -6919,10 +6919,10 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
  .unified-layout.rail-collapsed .library-page-loading { left: 66px; }
  .unified-layout .hub-folder-rail .folder-tree-entry { display: flex; align-items: center; min-height: 40px; }
  .unified-layout .hub-folder-rail .folder-tree-entry > button:not(.folder-tree-expand) { flex: 1; min-width: 0; }
- .unified-layout:not(.rail-collapsed) .hub-folder-rail .folder-tree-entry > button:not(.folder-tree-expand) { grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; }
+ .unified-layout:not(.rail-collapsed) .hub-folder-rail .folder-tree-entry > button:not(.folder-tree-expand) { grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; padding-inline: 0; }
  .unified-layout .hub-folder-rail .folder-tree-entry > button > span[aria-hidden="true"] { display: none; }
  .unified-layout .hub-folder-rail .folder-tree-entry > button > em { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
- .unified-layout .hub-folder-rail .folder-tree-expand, .unified-layout .hub-folder-rail .folder-tree-slot { flex: 0 0 28px; width: 28px; min-height: 40px; padding: 0; display: grid; place-items: center; }
+ .unified-layout .hub-folder-rail .folder-tree-expand, .unified-layout .hub-folder-rail .folder-tree-slot { flex: 0 0 16px; width: 16px; min-height: 40px; padding: 0; display: grid; place-items: center; }
  .unified-layout .hub-folder-rail .folder-tree-expand .menu-icon { width: 16px; height: 16px; }
  .unified-layout .hub-folder-rail button { min-height: 36px; font-size: 14px; }
  .unified-layout .hub-folder-rail .folder-label { font-size: 14px; line-height: 1.35; }
