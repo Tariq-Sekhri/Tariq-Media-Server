@@ -926,6 +926,10 @@
   min-width: 0;
 }
 
+.unified-layout .hub-folder-rail .library-tree-group > .folder-tree-entry > button > em {
+  display: none;
+}
+
 .unified-layout .folder-tree-group > button span {
   transition: transform 160ms ease;
 }
