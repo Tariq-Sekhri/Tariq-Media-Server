@@ -6967,6 +6967,7 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
  .unified-layout .hub-folder-rail .sidebar-collection-items button { min-height: 38px; }
  .unified-layout .browse-breadcrumb.root { display: none; }
  .unified-layout .library-heading-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+ .unified-layout .library-heading-title > .library-status { margin: 0; }
  .unified-layout .library-heading-title > .library-create { margin: 0; width: 36px; min-height: 36px; padding: 0; font-size: 14px; }
  .unified-layout .library-connection { font-size: 12px; }
  .unified-layout .library-status { font-size: 14px; color: #b9bfcb; }
