@@ -6742,6 +6742,7 @@ body .discover-title-dialog .discover-dialog-header { position: static; flex: 0 
 .card-menu > .danger { border-top: 1px solid #65414d; margin-top: 8px; }
 @media (max-width: 760px) {
  body:has(.mobile-navigation-shell) { --mobile-navigation-height: 64px; --mobile-navigation-space: calc(var(--mobile-navigation-height) + 1px + env(safe-area-inset-bottom, 0px)); }
+ body:has(.mobile-navigation-shell) :is(.success-toast, .job-toast) { bottom: calc(var(--mobile-navigation-space) + 12px); z-index: 120; left: 12px; right: 12px; width: fit-content; max-width: calc(100vw - 24px); margin-inline: auto; }
  body:has(.mobile-navigation-shell) .miniplayer:not(.expanded) { bottom: var(--mobile-navigation-space); }
  body:has(.mobile-navigation-shell):has(.miniplayer) .app-shell { padding-bottom: calc(112px + var(--mobile-navigation-space)); }
  .mobile-navigation-shell { display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 110; background: #12151c; padding-bottom: env(safe-area-inset-bottom,0px); border-top: 1px solid #36313f; height: var(--mobile-navigation-height, 64px); box-sizing: content-box; }
