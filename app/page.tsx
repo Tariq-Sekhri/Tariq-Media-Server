@@ -7051,7 +7051,7 @@ export default function Home() {
                   <button type="button" aria-label="Shuffle recent media" onClick={() => playVisibleQueue(true)}><MenuIcon name="shuffle" /></button>
                 </div>}
                 {!isPlaylistOverview && section !== "notes" && section !== "offline" && section !== "discover" && (
-                  <span className={`library-connection ${backendState}`} role="status" title={backendState === "offline" ? backendError || "Server unavailable" : undefined}>
+                  <span className={`library-connection ${backendState}`} role="status" aria-label={backendState === "online" ? "Server connected" : backendState === "offline" ? "Server offline" : "Connecting"} title={backendState === "online" ? "Server connected" : backendState === "offline" ? backendError || "Server unavailable" : "Connecting"}>
                     {backendState === "loading" || backendState === "cached" ? (
                       <i className="library-loading-spinner" aria-hidden="true" />
                     ) : (
@@ -7059,7 +7059,6 @@ export default function Home() {
                         {backendState === "online" ? <><path d="M4 9a12 12 0 0 1 16 0M7 12a7.5 7.5 0 0 1 10 0M10 15a3 3 0 0 1 4 0" /><circle cx="12" cy="18" r=".7" fill="currentColor" stroke="none" /></> : <><path d="m3 3 18 18M4 9a12 12 0 0 1 3-2M10 6a12 12 0 0 1 10 3M7 12a7.5 7.5 0 0 1 3-1M14 11a7.5 7.5 0 0 1 3 1M10 15a3 3 0 0 1 4 0" /><circle cx="12" cy="18" r=".7" fill="currentColor" stroke="none" /></>}
                       </svg>
                     )}
-                    {backendState === "online" ? "Server connected" : backendState === "offline" ? "Server offline" : "Connecting…"}
                   </span>
                 )}
                 {section === "offline" && (
