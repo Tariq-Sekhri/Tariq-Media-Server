@@ -5673,7 +5673,6 @@
   .unified-layout .topbar .search input { font-size: 14px; min-width: 0; }
   .unified-layout .workspace { padding-top: 72px; padding-bottom: 92px; }
   .unified-layout .content { padding-bottom: 24px; }
-  .unified-layout .library-connection.online { display: none; }
   .unified-layout .content > header > p:has(a:only-child),.unified-layout .content > header > p:has(> a:only-child) { display: none; }
   .unified-layout .library-heading-title h1 { font-size: 24px; }
   .unified-layout .toolbar { gap: 8px; }
@@ -5730,7 +5729,6 @@
   .unified-layout .topbar { position: static; top: auto; }
   .unified-layout .workspace { margin-top: 60px; padding-top: 0; }
   .unified-layout .heading-row .browse-breadcrumb.root { display: none; }
-  .unified-layout .library-connection:not(.offline):not(.loading):not(.cached) { display: none; }
   .unified-layout .hub-folder-rail .folder-tree-group > a > button,.unified-layout .hub-folder-rail > button { min-height: 48px; font-size: 14px; }
   .unified-layout .hub-folder-rail { --rail-drawer-top: 0px; top: 0; bottom: 0; height: 100dvh; min-height: 100dvh; max-height: 100dvh; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); z-index: 200; }
   .unified-layout.rail-drawer-visible .rail-drawer-backdrop { top: 0; bottom: 0; height: auto; z-index: 195; }
