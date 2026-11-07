@@ -8526,7 +8526,7 @@ fn release_season_from_name(value: &str) -> Option<ReleaseSeason> {
             continue;
         }
         let season = stem[season_start..cursor].parse::<u16>().ok()?;
-        let title = clean_media_component(&stem[..index]);
+        let title = clean_release_title(&stem[..index]);
         if !title.is_empty() {
             return Some(ReleaseSeason { title, season });
         }
@@ -8547,7 +8547,7 @@ fn release_season_from_name(value: &str) -> Option<ReleaseSeason> {
         return None;
     }
     let season = digits.parse::<u16>().ok()?;
-    let title = clean_media_component(&stem[..index]);
+    let title = clean_release_title(&stem[..index]);
     (!title.is_empty()).then_some(ReleaseSeason { title, season })
 }
 
@@ -8581,7 +8581,7 @@ fn episode_name_from_release(value: &str) -> Option<EpisodeName> {
             continue;
         }
         let episode = stem[episode_start..cursor].parse::<u16>().ok()?;
-        let title = clean_media_component(&stem[..index]);
+        let title = clean_release_title(&stem[..index]);
         if !title.is_empty() {
             return Some(EpisodeName {
                 title,
@@ -8611,7 +8611,7 @@ fn anime_episode_from_release(value: &str) -> Option<EpisodeName> {
     while title.starts_with('[') {
         title = title.split_once(']')?.1.trim_start();
     }
-    let title = clean_media_component(title);
+    let title = clean_release_title(title);
     let episode = digits.parse::<u16>().ok()?;
     if title.is_empty() || episode == 0 {
         return None;
@@ -8621,6 +8621,59 @@ fn anime_episode_from_release(value: &str) -> Option<EpisodeName> {
         season: release_season_from_name(value).map_or(1, |release| release.season),
         episode,
     })
+}
+
+fn clean_release_title(value: &str) -> String {
+    let mut value = value.trim();
+    while let Some(rest) = value.strip_prefix('[') {
+        let Some((_, rest)) = rest.split_once(']') else { break };
+        value = rest.trim_start();
+    }
+    clean_media_component(value.trim_end_matches([' ', '(', '[']))
+}
+
+fn season_directory_number(value: &str) -> Option<u16> {
+    let name = value.to_ascii_lowercase();
+    let number = name.strip_prefix("season ").or_else(|| name.strip_prefix('s'))?;
+    (!number.is_empty() && number.len() <= 2 && number.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| number.parse::<u16>().ok()).flatten()
+}
+
+fn episode_name_for_source(source: &Path, release_name: &str) -> Option<EpisodeName> {
+    let filename = source.file_name()?.to_string_lossy();
+    let mut episode = episode_name_from_release(&filename)
+        .or_else(|| episode_name_from_release(release_name))?;
+    // Multi-season anime packs can restart their file numbering at S01.
+    // The nearest explicit season directory owns the season in that case.
+    let directory_season = source.parent().into_iter().flat_map(Path::ancestors).find_map(|parent| {
+        season_directory_number(&parent.file_name()?.to_string_lossy())
+    });
+    if let Some(season) = directory_season {
+        episode.season = season;
+    } else if anime_episode_from_release(&filename).is_some()
+        && let Some(release) = release_season_from_name(release_name)
+    {
+        episode.season = release.season;
+    }
+    Some(episode)
+}
+
+fn supporting_media_destination(
+    source_root: &Path,
+    source: &Path,
+    show_root: &Path,
+    season_dirs: &BTreeSet<PathBuf>,
+) -> Option<PathBuf> {
+    let relative = source.strip_prefix(source_root).ok()?;
+    let has_season_root = relative.components().next()
+        .and_then(|component| season_directory_number(&component.as_os_str().to_string_lossy()))
+        .is_some();
+    let base = if source_root == show_root || has_season_root || season_dirs.len() != 1 {
+        show_root
+    } else {
+        season_dirs.first()?.as_path()
+    };
+    Some(base.join(relative))
 }
 
 fn clean_media_component(value: &str) -> String {
@@ -8728,18 +8781,13 @@ async fn organize_movie_tv_media(
     let source_count = sources.len();
     let mut moved = 0;
     let mut moves = Vec::new();
+    let mut season_dirs = BTreeSet::new();
     for source in sources {
-        let Some(mut episode) =
-            episode_name_from_release(&source.file_name().unwrap_or_default().to_string_lossy())
-                .or_else(|| episode_name_from_release(release_name))
+        let Some(episode) = episode_name_for_source(
+            source.strip_prefix(save_path).unwrap_or(&source), release_name)
         else {
             continue;
         };
-        if anime_episode_from_release(&source.file_name().unwrap_or_default().to_string_lossy()).is_some()
-            && let Some(release) = release_season_from_name(release_name)
-        {
-            episode.season = release.season;
-        }
         let extension = source
             .extension()
             .and_then(|value| value.to_str())
@@ -8773,6 +8821,10 @@ async fn organize_movie_tv_media(
             "{} - S{:02}E{:02}.{}",
             episode.title, episode.season, episode.episode, extension
         ));
+        season_dirs.insert(destination_dir.clone());
+        if source == destination {
+            continue;
+        }
         if destination.exists() {
             return Err(OrganizeError::permanent(format!(
                 "{} already exists",
@@ -8786,6 +8838,29 @@ async fn organize_movie_tv_media(
         cleanup_empty_media_directories(&source, save_path).await;
         tracing::info!(source = %source.display(), destination = %destination.display(), "TV episode organized into its show and season folder");
         moved += 1;
+    }
+    // Keep extras, subtitles and artwork with the show instead of leaving a
+    // second release folder that the catalog can mistake for a movie.
+    let show_roots = season_dirs.iter().filter_map(|season| season.parent().map(Path::to_path_buf))
+        .collect::<BTreeSet<_>>();
+    if show_roots.len() == 1 && source_root.is_dir() && source_root != save_path {
+        let show_root = show_roots.first().unwrap();
+        let supporting_files = WalkDir::new(source_root).follow_links(false).into_iter()
+            .filter_map(Result::ok).filter(|entry| entry.file_type().is_file())
+            .map(|entry| entry.into_path()).collect::<Vec<_>>();
+        for source in supporting_files {
+            let Some(destination) = supporting_media_destination(source_root, &source, show_root, &season_dirs) else { continue };
+            if source == destination { continue; }
+            let destination = unique_destination_path(&destination);
+            if let Some(parent) = destination.parent() {
+                tokio::fs::create_dir_all(parent).await
+                    .map_err(|error| OrganizeError::permanent(error.to_string()))?;
+            }
+            tokio::fs::rename(&source, &destination).await.map_err(OrganizeError::media_move)?;
+            moves.push((source.clone(), destination));
+            cleanup_empty_media_directories(&source, save_path).await;
+            moved += 1;
+        }
     }
     if moved == 0 {
         return Err(OrganizeError::permanent(
@@ -15153,12 +15228,12 @@ struct FolderPreviewInfo {
     item_count: u64,
 }
 
-/// Pick one stable pseudo-random image or video from a folder's descendants.
+/// Pick a stable preview, preferring episodes over bonus clips and artwork.
 /// The server supplies this with the folder card, so paged folder views do not
 /// need to load every descendant solely to find a cover. The item count is
 /// returned separately because document-only folders have no visual preview.
 fn folder_preview_info(root: &Path, folder: &Path) -> FolderPreviewInfo {
-    let mut chosen: Option<(u64, String, &'static str)> = None;
+    let mut chosen: Option<((bool, u64), String, &'static str)> = None;
     let mut item_count = 0_u64;
     // Begin with the folder's direct children. This enters a managed Windows
     // junction once, while `WalkDir` still refuses to follow any links below
@@ -15200,7 +15275,8 @@ fn folder_preview_info(root: &Path, folder: &Path) -> FolderPreviewInfo {
             let mut hasher = DefaultHasher::new();
             folder.hash(&mut hasher);
             path.hash(&mut hasher);
-            let score = hasher.finish();
+            // A bonus clip must not make a paged series look like a movie.
+            let score = (!(kind == "video" && is_episode_path(&path)), hasher.finish());
             if chosen
                 .as_ref()
                 .is_none_or(|(current, _, _)| score < *current)
@@ -18650,6 +18726,53 @@ mod tests {
         assert!(episode_name_from_release("The Fable - 2019.mkv").is_none());
         assert!(!is_episode_path("Movies/The Fable - 1080p.mkv"));
         assert!(episode_name_from_release("Movie - 01 Trailer.mkv").is_none());
+    }
+
+    #[test]
+    fn anime_organization_respects_season_directories_and_cleans_release_groups() {
+        let episode = episode_name_for_source(
+            Path::new("Batch/Season 02/[Fansub] Example Show - S01E03.mkv"),
+            "[Fansub] Example Show S01-S02",
+        ).unwrap();
+        assert_eq!(episode, EpisodeName { title: "Example Show".to_owned(), season: 2, episode: 3 });
+        let absolute = episode_name_for_source(
+            Path::new("Batch/Season 02/[Fansub] Example Show - 03.mkv"),
+            "[Fansub] Example Show S01-S02",
+        ).unwrap();
+        assert_eq!((absolute.season, absolute.episode), (2, 3));
+        let release = release_season_from_name("[Fansub] Example Show S02 1080p").unwrap();
+        assert_eq!(release.title, "Example Show");
+        assert_eq!(release.season, 2);
+        assert_eq!(clean_release_title("[Fansub] Example Show (2005)"), "Example Show (2005)");
+        assert!(episode_name_for_source(Path::new("Season 02/Extras/NCOP01.mkv"), "Example Show S01-S02").is_none());
+    }
+
+    #[test]
+    fn anime_series_preview_prefers_episodes_over_bonus_clips() {
+        let root = std::env::temp_dir().join(format!("tms-anime-preview-{}", uuid::Uuid::new_v4()));
+        let folder = root.join("Example Show");
+        std::fs::create_dir_all(folder.join("Season 01/Extras")).unwrap();
+        for number in 1..=20 {
+            std::fs::write(folder.join(format!("Season 01/Extras/NCOP{number:02}.mkv")), b"bonus").unwrap();
+        }
+        std::fs::write(folder.join("Season 01/Example Show S01E01.mkv"), b"episode").unwrap();
+        let preview = folder_preview_info(&root, &folder);
+        assert_eq!(preview.item_count, 21);
+        assert_eq!(preview.kind, Some("video"));
+        assert!(preview.path.as_deref().is_some_and(is_episode_path));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn anime_supporting_files_keep_season_and_extra_structure() {
+        let source = Path::new("Library/Batch");
+        let show = Path::new("Library/Example Show");
+        let seasons = BTreeSet::from([show.join("Season 01"), show.join("Season 02")]);
+        assert_eq!(supporting_media_destination(source, &source.join("Season 02/Extras/NCOP01.mkv"), show, &seasons), Some(show.join("Season 02/Extras/NCOP01.mkv")));
+        assert_eq!(supporting_media_destination(source, &source.join("readme.txt"), show, &seasons), Some(show.join("readme.txt")));
+        let one_season = BTreeSet::from([show.join("Season 02")]);
+        assert_eq!(supporting_media_destination(source, &source.join("Extras/NCOP01.mkv"), show, &one_season), Some(show.join("Season 02/Extras/NCOP01.mkv")));
+        assert_eq!(supporting_media_destination(show, &show.join("Season 02/Extras/NCOP01.mkv"), show, &seasons), Some(show.join("Season 02/Extras/NCOP01.mkv")));
     }
 
     use crate::qbit::{is_qbit_zero_progress_failure, is_recoverable_qbittorrent_connection_failure, qbittorrent_bound_interface, stale_vpn_interface_replacement, valid_magnet_link};
