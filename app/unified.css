@@ -1848,10 +1848,10 @@
   display: grid;
   place-items: center;
   padding: 6px 8px;
-  border: 1px solid #30363d;
-  border-radius: 6px;
-  background: #15191e;
-  color: #aeb6bc;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #d5c6ff;
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
@@ -1859,15 +1859,20 @@
 }
 
 .unified-layout .library-heading-title .library-create .menu-icon {
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
+  stroke-width: 2;
   margin: 0;
 }
 
 .unified-layout .library-heading-title .library-create:hover {
-  border-color: #525c65;
-  background: #1c2228;
-  color: #f0f2f3;
+  background: #24212d;
+  color: #ede6ff;
+}
+
+.unified-layout .library-heading-title .library-create:focus-visible {
+  outline: 2px solid #b6a3ff;
+  outline-offset: 2px;
 }
 
 @media (max-width: 480px) {
