@@ -1845,6 +1845,8 @@
 
 .unified-layout .library-heading-title .library-create {
   flex: 0 0 auto;
+  display: grid;
+  place-items: center;
   padding: 6px 8px;
   border: 1px solid #30363d;
   border-radius: 6px;
@@ -1854,6 +1856,12 @@
   font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.unified-layout .library-heading-title .library-create .menu-icon {
+  width: 20px;
+  height: 20px;
+  margin: 0;
 }
 
 .unified-layout .library-heading-title .library-create:hover {
@@ -6943,7 +6951,7 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
  .unified-layout .hub-folder-rail .sidebar-collection-items button { min-height: 38px; }
  .unified-layout .browse-breadcrumb.root { display: none; }
  .unified-layout .library-heading-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
- .unified-layout .library-heading-title > .library-create { margin: 0; min-height: 36px; padding: 0 12px; font-size: 14px; }
+ .unified-layout .library-heading-title > .library-create { margin: 0; width: 36px; min-height: 36px; padding: 0; font-size: 14px; }
  .unified-layout .library-connection { font-size: 12px; }
  .unified-layout .library-status { font-size: 14px; color: #b9bfcb; }
  .unified-layout .card-details strong, .unified-layout .catalog-title-card .card-details strong { font-size: 15px; line-height: 1.35; }

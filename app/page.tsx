@@ -7113,10 +7113,12 @@ export default function Home() {
                 canManageLibraries && !selectionMode && (
                   <button
                     className="library-create"
+                    aria-label="New library"
+                    title="New library"
                     type="button"
                     onClick={startLibraryCreation}
                   >
-                    New library
+                    <MenuIcon name="plus" />
                   </button>
                 )}
               </div>
