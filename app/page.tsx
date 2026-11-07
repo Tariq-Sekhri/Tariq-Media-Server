@@ -6995,12 +6995,25 @@ export default function Home() {
                   <div className={`library-heading-title${currentFolder ? " has-parent" : ""}`}>
                 {currentFolder && <button className="mobile-parent-link" type="button" aria-label={`Back to ${currentFolder.split("/").slice(-2,-1)[0] || "Libraries"}`} onClick={() => { const parent = currentFolder.split("/").slice(0,-1).join("/") || null; restoreFolderBrowsePrefs(parent); setCurrentFolder(parent); }}><MenuIcon name="chevronLeft" /></button>}
                 <h1>
+                  <span>
                   {activeSearch.trim()
                     ? `Results for “${activeSearch.trim()}”`
                     : currentFolder
                     ? (titleCollectionForPath(currentFolder)?.label ??
                       currentFolder.split("/").at(-1))
                     : title}
+                  </span>
+                  {!isPlaylistOverview && section !== "notes" && section !== "offline" && section !== "discover" && (
+                    <span className={`library-connection ${backendState}`} role="status" aria-label={backendState === "online" ? "Server connected" : backendState === "offline" ? "Server offline" : "Connecting"} title={backendState === "online" ? "Server connected" : backendState === "offline" ? backendError || "Server unavailable" : "Connecting"}>
+                      {backendState === "loading" || backendState === "cached" ? (
+                        <i className="library-loading-spinner" aria-hidden="true" />
+                      ) : (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          {backendState === "online" ? <><path d="M4 9a12 12 0 0 1 16 0M7 12a7.5 7.5 0 0 1 10 0M10 15a3 3 0 0 1 4 0" /><circle cx="12" cy="18" r=".7" fill="currentColor" stroke="none" /></> : <><path d="m3 3 18 18M4 9a12 12 0 0 1 3-2M10 6a12 12 0 0 1 10 3M7 12a7.5 7.5 0 0 1 3-1M14 11a7.5 7.5 0 0 1 3 1M10 15a3 3 0 0 1 4 0" /><circle cx="12" cy="18" r=".7" fill="currentColor" stroke="none" /></>}
+                        </svg>
+                      )}
+                    </span>
+                  )}
                 </h1>
               {section === "library" && currentFolder && (canCreateFolderHere || canUploadHere || canServerDownloadHere) && (
                 <div className="folder-tools">
@@ -7050,17 +7063,6 @@ export default function Home() {
                   <button type="button" aria-label="Play all recent media" onClick={() => playVisibleQueue(false)}><MenuIcon name="play" /></button>
                   <button type="button" aria-label="Shuffle recent media" onClick={() => playVisibleQueue(true)}><MenuIcon name="shuffle" /></button>
                 </div>}
-                {!isPlaylistOverview && section !== "notes" && section !== "offline" && section !== "discover" && (
-                  <span className={`library-connection ${backendState}`} role="status" aria-label={backendState === "online" ? "Server connected" : backendState === "offline" ? "Server offline" : "Connecting"} title={backendState === "online" ? "Server connected" : backendState === "offline" ? backendError || "Server unavailable" : "Connecting"}>
-                    {backendState === "loading" || backendState === "cached" ? (
-                      <i className="library-loading-spinner" aria-hidden="true" />
-                    ) : (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        {backendState === "online" ? <><path d="M4 9a12 12 0 0 1 16 0M7 12a7.5 7.5 0 0 1 10 0M10 15a3 3 0 0 1 4 0" /><circle cx="12" cy="18" r=".7" fill="currentColor" stroke="none" /></> : <><path d="m3 3 18 18M4 9a12 12 0 0 1 3-2M10 6a12 12 0 0 1 10 3M7 12a7.5 7.5 0 0 1 3-1M14 11a7.5 7.5 0 0 1 3 1M10 15a3 3 0 0 1 4 0" /><circle cx="12" cy="18" r=".7" fill="currentColor" stroke="none" /></>}
-                      </svg>
-                    )}
-                  </span>
-                )}
                 {section === "offline" && (
                   <div className="library-settings">
                     <button

@@ -1078,6 +1078,18 @@
   margin-top: 5px;
 }
 
+.unified-layout .library-heading-title > h1 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.unified-layout .library-heading-title > h1 > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .unified-layout .library-connection {
   display: inline-flex;
   flex: 0 0 auto;
@@ -6859,10 +6871,6 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
  .unified-layout .library-heading-title.has-parent,
  .unified-layout .library-heading-title.has-parent:has(.folder-tools) { grid-template-columns: 48px minmax(0,1fr) auto; }
  .unified-layout .library-heading-title > h1 { grid-column: 1; grid-row: 1; margin: 0 !important; font-size: 23px !important; line-height: 1.2; white-space: normal; }
- .unified-layout .library-heading-title:has(> .library-connection) > h1 { padding-right: 32px; }
- .unified-layout .library-heading-title > .library-connection { grid-column: 1; grid-row: 1; justify-self: end; width: 32px; height: 32px; padding: 0; justify-content: center; border: 0; background: transparent; }
- .unified-layout .library-heading-title > .library-connection > svg { width: 26px; height: 26px; stroke-width: 2; }
- .unified-layout .library-heading-title.has-parent > .library-connection { grid-column: 2; }
  .unified-layout .library-heading-title > .library-status { grid-column: 1; grid-row: 2; text-align: left; margin: 2px 0 0 !important; font-size: 14px; line-height: 20px; }
  .unified-layout .library-heading-title.has-parent > :is(h1,.library-status) { grid-column: 2; }
  .unified-layout .library-heading-title > .mobile-parent-link { grid-column: 1; grid-row: 1 / span 2; display: grid; place-items: center; padding: 0; width: 48px; height: 48px; margin: 0; }
