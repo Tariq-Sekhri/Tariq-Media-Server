@@ -6986,6 +6986,13 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 
 /* Desktop overlays and the collapsed rail stay within their allocated space. */
 @media (min-width: 761px) {
+ .unified-layout .folder-tools > button { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; border: 1px solid #343b43; border-radius: 8px; background: #171c21; color: #dce1e6; font: inherit; font-size: 14px; cursor: pointer; }
+ .unified-layout .folder-tools > button:hover, .unified-layout .folder-tools > button[aria-expanded="true"] { background: #242a31; border-color: #6e6388; color: #fff; }
+ .unified-layout .folder-tools-menu { padding: 6px; border-color: #343b43; background: #101419; }
+ .unified-layout .folder-tools-menu > button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 9px 10px; border: 0; border-radius: 6px; background: transparent; box-shadow: none; color: #c4ccd4; font: inherit; font-size: 14px; line-height: 1.35; cursor: pointer; }
+ .unified-layout .folder-tools-menu > button:hover { background: #242a31; color: #fff; }
+ .unified-layout .folder-tools button:focus-visible { outline: 2px solid #b6a3ff; outline-offset: 2px; }
+ .unified-layout .folder-tools .menu-icon { flex: 0 0 18px; width: 18px; height: 18px; margin: 0; }
  .unified-layout.rail-collapsed .hub-folder-rail { width: 46px; padding: 8px 3px; box-sizing: border-box; overflow-x: hidden; }
  .unified-layout.rail-collapsed .hub-folder-rail .folder-children { display: none; }
  .unified-layout.rail-collapsed .hub-folder-rail .folder-tree-entry { justify-content: center; }
