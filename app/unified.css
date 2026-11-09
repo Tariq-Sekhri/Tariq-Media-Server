@@ -7327,3 +7327,10 @@ thead .lib-tabs-person { background: #12171b; }
 .admin-user-row .admin-account-type { white-space: nowrap; }
 .admin-user-row .admin-row-actions { flex-wrap: nowrap; }
 @media (max-width: 760px) { .admin-user-row .admin-row-actions { flex-wrap: wrap; } }
+@media (max-width: 900px) {
+  .admin-user-table-head { display: none; }
+  .admin-user-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .admin-user-row > .admin-user-identity { grid-column: 1 / -1; }
+  .admin-user-row > time { display: none; }
+  .admin-user-row > .admin-row-actions { grid-column: 1 / -1; justify-content: flex-start; }
+}
