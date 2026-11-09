@@ -1693,6 +1693,13 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
             <span>New libraries created in TMS live here by default.</span>
           </div>
           <span className={`admin-location-status ${libraryLocations?.main_root_available ? "online" : "offline"}`}><i />{libraryLocations?.main_root_available ? "Available" : "Unavailable"}</span>
+          {currentUser?.is_admin && <details className="admin-location-move">
+            <summary>Move TMS</summary>
+            <p>Move the installation and its data together from an administrator PowerShell window on the server. Choose a new, empty destination.</p>
+            <code>{".\\scripts\\move-tms.ps1 -Destination 'D:\\TMS'"}</code>
+            <p>This previews the move. Stop TMS, exit its tray icon and disable its scheduled tasks before running the same command with <code>-Apply</code>. The tool verifies the copy before switching locations, rolls back a failed switch, and keeps the originals as backups. External media folders stay in place.</p>
+            <p>TMS stays offline during the move. An interrupted switch must be recovered with <code>-Recover</code> before starting it again. See <code>docs/relocating-tms.md</code> for the full procedure.</p>
+          </details>}
         </article>
         {loading && !libraryLocations ? <article className="admin-surface admin-section-surface"><div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading library locations</b></div></article> : libraryLocations?.locations.filter((location) => location.external).map((location) => {
           const targetFolder = location.parent_library
@@ -1717,7 +1724,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
               </div>
               <div className="admin-location-actions">
                 <span className={`admin-location-status ${location.available ? "online" : "offline"}`}><i />{location.available ? "Available" : "Offline"}</span>
-                <button type="button" className="admin-location-remove" disabled={detachingLocation === `${location.parent_library ?? "library"}:${location.folder_path ?? location.name}`} onClick={() => void detachLibraryLocation(location)}>{detachingLocation === `${location.parent_library ?? "library"}:${location.folder_path ?? location.name}` ? "Removing…" : "Remove from TMS"}</button>
+                <button type="button" className="admin-location-remove" disabled={detachingLocation === `${location.parent_library ?? "library"}:${location.folder_path ?? location.name}`} onClick={() => void detachLibraryLocation(location)}>{detachingLocation === `${location.parent_library ?? "library"}:${location.folder_path ?? location.name}` ? "Removing…" : "Remove"}</button>
               </div>
             </article>
           );
