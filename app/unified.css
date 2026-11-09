@@ -7357,3 +7357,12 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 .admin-user-storage progress::-webkit-progress-bar { border-radius: 999px; background: #292e37; }
 .admin-user-storage progress::-webkit-progress-value { border-radius: 999px; background: #a38ce8; }
 .admin-user-storage progress::-moz-progress-bar { border-radius: 999px; background: #a38ce8; }
+
+/* Keep desktop account details aligned with the other cells in the row. */
+@media (min-width: 901px) {
+  .admin-user-identity > div { flex: 1; flex-direction: row; align-items: center; gap: 16px; }
+  .admin-user-identity > div > b { flex: none; max-width: 160px; }
+  .admin-user-identity .admin-user-storage { flex-direction: row; align-items: center; gap: 12px; }
+  .admin-user-storage small { min-width: 0; }
+  .admin-user-storage progress { flex: 0 1 120px; min-width: 48px; width: 120px; margin-top: 0; }
+}
