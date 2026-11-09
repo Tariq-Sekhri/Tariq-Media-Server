@@ -7010,6 +7010,13 @@ export default function Home() {
                 )}
               </div>
                 </div>
+
+              </div>
+            </div>
+          </div>
+
+          {!isPlaylistOverview && section !== "notes" && section !== "discover" && (
+          <div className="browse-controls">
                 {!isPlaylistOverview && section !== "notes" && section !== "discover" && (section === "offline" || section === "playlists" ? visible.length > 0 && filterTags.length > 1 : currentLibraryType !== "movies_tv" && !activeSearch.trim() && filterTags.length > 1) && (
                   <div className="tag-strip">
                     <span>Filter by</span>
@@ -7026,11 +7033,6 @@ export default function Home() {
                     ))}
                   </div>
                 )}
-              </div>
-            </div>
-          </div>
-
-          {!isPlaylistOverview && section !== "notes" && section !== "discover" && (
           <div className="toolbar">
             <div>
               {!activeSearch.trim() && (section === "playlists" || (section === "offline" && currentFolder)) && <span>
@@ -7242,6 +7244,7 @@ export default function Home() {
                 </div>
               ) : null}</>}
             </div>
+          </div>
           </div>
           )}
 
