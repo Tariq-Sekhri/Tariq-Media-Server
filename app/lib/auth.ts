@@ -93,7 +93,27 @@ export const getSessionUser = (): SessionUser | null => {
   try { return JSON.parse(localStorage.getItem(SESSION_USER_KEY) ?? localStorage.getItem(LEGACY_SESSION_USER_KEY) ?? "null") as SessionUser | null; } catch { return null; }
 };
 export const hasActiveCachedSession = () => Boolean(getSessionToken() && getSessionUser());
+// Browse snapshots, play queues and handoffs live in sessionStorage. Drop them
+// whenever the signed-in account changes so one account never sees another's.
+export const ACCOUNT_CHANGED_EVENT = "tms:account-changed";
+const clearAccountSessionData = () => {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new Event(ACCOUNT_CHANGED_EVENT));
+  } catch {
+    // Listeners only drop in-memory copies.
+  }
+  try {
+    for (const key of Object.keys(sessionStorage)) {
+      if (key.startsWith("tms:") || key.startsWith("framebox:")) sessionStorage.removeItem(key);
+    }
+  } catch {
+    // Storage can be unavailable in private or embedded contexts.
+  }
+};
+
 export const rememberSession = (token: string, user: SessionUser) => {
+  if (getSessionUser()?.id !== user.id) clearAccountSessionData();
   localStorage.setItem(SESSION_TOKEN_KEY, token);
   syncSessionCookie(token);
   localStorage.setItem(SESSION_USER_KEY, JSON.stringify(user));
@@ -103,6 +123,7 @@ export const rememberSession = (token: string, user: SessionUser) => {
   localStorage.removeItem(LEGACY_SESSION_USER_KEY);
 };
 export const clearSession = () => {
+  clearAccountSessionData();
   localStorage.removeItem(SESSION_TOKEN_KEY);
   syncSessionCookie("");
   localStorage.removeItem(SESSION_USER_KEY);

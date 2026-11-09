@@ -3627,11 +3627,7 @@ fn query_parameter(query: Option<&str>, name: &str) -> Option<String> {
 }
 
 fn library_path_rule(path: String) -> FileRule {
-    let traverses = path.contains(':')
-        || path.contains('\0')
-        || path.starts_with(['/', '\\'])
-        || path.split(['/', '\\']).any(|part| part == "..");
-    if traverses { FileRule::Deny } else { FileRule::LibraryPath(path) }
+    if escapes_root(&path) { FileRule::Deny } else { FileRule::LibraryPath(path) }
 }
 
 /// Decide what a request needs from its path and query alone.
@@ -3790,6 +3786,14 @@ fn session_client_details(headers: &HeaderMap) -> (String, String) {
     (user_agent, ip_address)
 }
 
+/// Only full admins may edit or delete accounts that hold any admin rights, so a
+/// partial admin cannot take over an account with more rights than their own.
+fn can_administer_user(actor: &StoredUser, target: &StoredUser) -> bool {
+    actor.is_admin
+        || actor.id == target.id
+        || (!target.is_admin && target.admin_permissions == AdminPermissions::default())
+}
+
 fn can_manage_user_sessions(actor: &StoredUser, target: &StoredUser) -> bool {
     has_admin_capability(actor, |permissions| {
         if target.is_admin {
@@ -3900,6 +3904,47 @@ async fn record_session_activity(State(state): State<AppState>, headers: HeaderM
     }
 }
 
+const LOGIN_FREE_ATTEMPTS: u32 = 5;
+const LOGIN_MAX_LOCKOUT: Duration = Duration::from_secs(15 * 60);
+
+/// Failed sign-in attempts per account name: (failures, next attempt allowed at).
+fn login_attempts() -> &'static std::sync::Mutex<HashMap<String, (u32, Instant)>> {
+    static ATTEMPTS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, (u32, Instant)>>> =
+        std::sync::OnceLock::new();
+    ATTEMPTS.get_or_init(Default::default)
+}
+
+fn login_lockout(failures: u32) -> Duration {
+    if failures < LOGIN_FREE_ATTEMPTS {
+        return Duration::ZERO;
+    }
+    let doublings = (failures - LOGIN_FREE_ATTEMPTS).min(10);
+    (Duration::from_secs(15) * 2u32.pow(doublings)).min(LOGIN_MAX_LOCKOUT)
+}
+
+/// Count an attempt before checking it, so parallel guesses cannot slip past the limit.
+fn begin_login_attempt(key: &str) -> Result<(), StatusCode> {
+    let now = Instant::now();
+    let mut attempts = login_attempts().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if attempts.len() > 10_000 {
+        attempts.retain(|_, (_, allowed_at)| *allowed_at + LOGIN_MAX_LOCKOUT > now);
+    }
+    let entry = attempts.entry(key.to_owned()).or_insert((0, now));
+    if entry.1 > now {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
+    entry.0 = entry.0.saturating_add(1);
+    entry.1 = now + login_lockout(entry.0);
+    Ok(())
+}
+
+fn finish_login_attempt(key: &str) {
+    login_attempts()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(key);
+}
+
 async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -3907,6 +3952,11 @@ async fn login(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let started = Instant::now();
     let name = request.name.trim();
+    let attempt_key = name.to_ascii_lowercase();
+    if let Err(status) = begin_login_attempt(&attempt_key) {
+        tracing::warn!(event = "login_throttled", user_name = %name, "Login rejected: too many failed attempts");
+        return Err(status);
+    }
     let requested_device_id = truncate_log_value(request.device_id.trim(), 128);
     let requested_device_name = truncate_log_value(request.device_name.trim(), 160);
     let user = read_users(&state.users_path)
@@ -3929,6 +3979,7 @@ async fn login(
         tracing::warn!(event = "login_failed", user_id = user.id, user_name = %user.name, "Login rejected: invalid password");
         return Err(StatusCode::UNAUTHORIZED);
     }
+    finish_login_attempt(&attempt_key);
     let (user_agent, ip_address) = session_client_details(&headers);
     let now = current_unix_timestamp();
     let session = StoredSession {
@@ -4730,7 +4781,10 @@ async fn update_admin_user(
         .iter()
         .position(|user| user.id == user_id)
         .ok_or(StatusCode::NOT_FOUND)?;
-    if users[index].is_admin && !actor.is_admin {
+    if !can_administer_user(&actor, &users[index]) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if !actor.is_admin && actor.id == user_id && request.storage_quota_bytes.is_some() {
         return Err(StatusCode::FORBIDDEN);
     }
     if let Some(is_admin) = request.is_admin {
@@ -4789,7 +4843,7 @@ async fn delete_admin_user(
     let Some(index) = users.iter().position(|user| user.id == user_id) else {
         return StatusCode::NOT_FOUND;
     };
-    if users[index].is_admin && !actor.is_admin {
+    if !can_administer_user(&actor, &users[index]) {
         return StatusCode::FORBIDDEN;
     }
     if users[index].is_admin && users.iter().filter(|user| user.is_admin).count() == 1 {
@@ -7351,11 +7405,26 @@ fn is_library_path(path: &str) -> bool {
         && !path.eq_ignore_ascii_case(".tms-data")
 }
 
+/// Windows drops trailing dots and spaces, so `.. ` and `...` act like `..`.
+fn dot_segment(segment: &str) -> bool {
+    !segment.is_empty() && segment.trim_end_matches(['.', ' ']).is_empty()
+}
+
+/// True when a library-relative path could reach outside its root on Windows:
+/// absolute or drive-relative (`C:x`), NUL bytes, or any dot-only segment.
+fn escapes_root(path: &str) -> bool {
+    path.contains(':')
+        || path.contains('\0')
+        || path.starts_with(['/', '\\'])
+        || Path::new(path).is_absolute()
+        || path.split(['/', '\\']).any(dot_segment)
+}
+
 fn safe_relative_path(path: &str) -> bool {
     !path.is_empty()
-        && path
-            .split('/')
-            .all(|segment| !segment.is_empty() && !matches!(segment, "." | ".."))
+        && !path.contains('\\')
+        && !escapes_root(path)
+        && path.split('/').all(|segment| !segment.is_empty())
 }
 
 async fn read_libraries(state: &AppState) -> BTreeMap<String, LibraryConfig> {
@@ -12342,12 +12411,7 @@ fn subtitle_response(source: &str, cache_control: &'static str) -> Response {
 }
 
 fn safe_library_path(root: &Path, relative: &str) -> Result<PathBuf, StatusCode> {
-    if relative.is_empty()
-        || Path::new(relative).is_absolute()
-        // `C:folder` is drive-relative on Windows and escapes the library root.
-        || relative.contains(':')
-        || relative.split(['/', '\\']).any(|part| part == "..")
-    {
+    if relative.is_empty() || escapes_root(relative) {
         return Err(StatusCode::BAD_REQUEST);
     }
     Ok(root.join(relative.replace('/', "\\")))
@@ -16498,12 +16562,22 @@ async fn refresh_ytdlp_cookies(
     headers: HeaderMap,
     Json(request): Json<YtDlpCookiesExtractRequest>,
 ) -> Result<Json<YtDlpCookiesExtractResponse>, (StatusCode, Json<Value>)> {
-    if authenticated_user(&state, &headers).await.is_none() {
+    let Some(user) = authenticated_user(&state, &headers).await else {
         return Err((
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({ "message": "Sign in to refresh cookies." })),
         ));
-    }
+    };
+    // Anyone may refresh, but only download managers see what the cookie file holds.
+    let manager = has_admin_capability(&user, |permissions| permissions.manage_downloads);
+    let redact = |mut status: YtDlpCookiesStatus| {
+        if !manager {
+            status.size_bytes = 0;
+            status.line_count = 0;
+            status.sample_domains.clear();
+        }
+        status
+    };
     let browser = request.browser.trim();
     let browser_arg = if browser.is_empty() || browser.eq_ignore_ascii_case("auto") {
         None
@@ -16514,14 +16588,17 @@ async fn refresh_ytdlp_cookies(
         Ok((extracted_from, status)) => Ok(Json(YtDlpCookiesExtractResponse {
             success: true,
             message: format!("Successfully refreshed cookies from {extracted_from}."),
-            status,
+            status: redact(status),
         })),
         Err(err) => {
             let status = read_ytdlp_cookies_status(&state).await;
+            if !manager {
+                tracing::warn!(user = %user.name, error = %err, "Cookie refresh failed");
+            }
             Ok(Json(YtDlpCookiesExtractResponse {
                 success: false,
-                message: err,
-                status,
+                message: if manager { err } else { "Could not refresh cookies.".to_owned() },
+                status: redact(status),
             }))
         }
     }
@@ -19384,9 +19461,60 @@ mod tests {
     }
 
     #[test]
+    fn repeated_failed_logins_lock_the_account_name() {
+        let key = format!("throttle-test-{}", uuid::Uuid::new_v4());
+        for _ in 0..LOGIN_FREE_ATTEMPTS - 1 {
+            assert!(begin_login_attempt(&key).is_ok());
+        }
+        assert!(begin_login_attempt(&key).is_ok());
+        assert_eq!(begin_login_attempt(&key), Err(StatusCode::TOO_MANY_REQUESTS));
+        finish_login_attempt(&key);
+        assert!(begin_login_attempt(&key).is_ok());
+        assert_eq!(login_lockout(LOGIN_FREE_ATTEMPTS + 20), LOGIN_MAX_LOCKOUT);
+    }
+
+    #[test]
+    fn safe_relative_path_rejects_windows_traversal() {
+        assert!(safe_relative_path("Movies/Show/Season 1/ep...mkv"));
+        assert!(safe_relative_path("Movies/.hidden"));
+        for unsafe_path in [
+            "",
+            "Movies//x",
+            "Movies/./x",
+            "Movies/../x",
+            r"Movies/..\..\x",
+            r"Movies\x",
+            "Movies/.. /x",
+            "Movies/...",
+            "Movies/C:x",
+            "C:",
+            "/Movies",
+            "Movies/x\0",
+        ] {
+            assert!(!safe_relative_path(unsafe_path), "{unsafe_path:?} should be rejected");
+        }
+        for traversal in [r"Movies/..\..\x", "Movies/.. /x", "Movies/...", "C:x", "/x"] {
+            assert!(matches!(library_path_rule(traversal.to_owned()), FileRule::Deny));
+        }
+    }
+
+    #[test]
     fn safe_library_path_rejects_traversal_and_absolute_paths() {
         let root = Path::new(r"C:\media");
-        for unsafe_path in ["", "../secret", "Movies/../../secret", r"C:\secret", "C:secret", "Movies/C:x"] {
+        for unsafe_path in [
+            "",
+            "../secret",
+            "Movies/../../secret",
+            r"C:\secret",
+            "C:secret",
+            "Movies/C:x",
+            r"Movies\..\..\secret",
+            "Movies/.. /secret",
+            "Movies/.../secret",
+            "/secret",
+            r"\secret",
+            "Movies/x\0",
+        ] {
             assert_eq!(
                 safe_library_path(root, unsafe_path),
                 Err(StatusCode::BAD_REQUEST)

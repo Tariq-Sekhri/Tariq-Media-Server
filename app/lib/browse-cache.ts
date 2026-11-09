@@ -48,10 +48,18 @@ export type BrowseSnapshot = {
 };
 
 let inMemoryBrowseSnapshot: BrowseSnapshot | null = null;
+let listensForAccountChanges = false;
+// Matches ACCOUNT_CHANGED_EVENT in auth.ts: never restore another account's view.
+const forgetSnapshotOnAccountChange = () => {
+  if (listensForAccountChanges || typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+  listensForAccountChanges = true;
+  window.addEventListener("tms:account-changed", () => { inMemoryBrowseSnapshot = null; }, { capture: false });
+};
 
 export const saveBrowseSnapshot = (snapshot: Omit<BrowseSnapshot, "savedAt">) => {
   const fullSnapshot: BrowseSnapshot = { ...snapshot, savedAt: Date.now() };
   inMemoryBrowseSnapshot = fullSnapshot;
+  forgetSnapshotOnAccountChange();
   if (typeof window === "undefined") return;
   if (fullSnapshot.items.length > MAX_SESSION_SNAPSHOT_ITEMS) {
     try {
@@ -86,7 +94,7 @@ export const readBrowseSnapshot = (currentUrl?: string, userId?: number): Browse
     if (!snapshot) return false;
     // Expire snapshots older than 2 hours
     if (Date.now() - snapshot.savedAt > 2 * 60 * 60 * 1000) return false;
-    if (userId !== undefined && snapshot.userId !== undefined && snapshot.userId !== userId) return false;
+    if (userId !== undefined && snapshot.userId !== userId) return false;
     if (currentUrl) {
       // If currentUrl is given, make sure it corresponds to the same folder / page
       const currentParams = new URLSearchParams(currentUrl.includes("?") ? currentUrl.slice(currentUrl.indexOf("?")) : "");
