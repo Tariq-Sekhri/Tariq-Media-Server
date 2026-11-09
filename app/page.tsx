@@ -1394,6 +1394,25 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [folderToolsOpen, setFolderToolsOpen] = useState(false);
   useBackLayer(folderToolsOpen, () => setFolderToolsOpen(false));
+  useEffect(() => {
+    if (!folderToolsOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest(".folder-tools")) setFolderToolsOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setFolderToolsOpen(false);
+        document.querySelector<HTMLButtonElement>('[aria-controls="folder-tools-menu"]')?.focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside, true);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside, true);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [folderToolsOpen]);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -6885,7 +6904,7 @@ export default function Home() {
               {section === "library" && currentFolder && (canCreateFolderHere || canUploadHere || canServerDownloadHere) && (
                 <div className="folder-tools">
                   <button type="button" aria-label="Add media" aria-expanded={folderToolsOpen} aria-controls="folder-tools-menu" onClick={() => setFolderToolsOpen(!folderToolsOpen)}><MenuIcon name="plus" /><span className="folder-tools-label">Add media</span></button>
-                  {folderToolsOpen && <div id="folder-tools-menu" role="dialog" aria-modal="true" aria-label="Add media" className="folder-tools-menu" onClick={(event) => { if ((event.target as HTMLElement).closest("button")) setFolderToolsOpen(false); }}>
+                  {folderToolsOpen && <div id="folder-tools-menu" role="dialog" aria-modal="false" aria-label="Add media" className="folder-tools-menu" onClick={(event) => { if ((event.target as HTMLElement).closest("button")) setFolderToolsOpen(false); }}>
                   {!currentLibrary?.folder_structure_static && <button
                     className="toolbar-create"
                     type="button"

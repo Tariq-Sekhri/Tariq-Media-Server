@@ -12,6 +12,7 @@ function mount() {
     addEventListener() {}, removeEventListener() {},
   };
   const scrolls = [];
+  const focused = [];
   const window = { scrollY: 420, scrollTo: (...args) => scrolls.push(args) };
   const { default: ModalIsolation } = load('app/ModalIsolation.tsx', {
     document, window,
@@ -25,17 +26,25 @@ function mount() {
   });
   ModalIsolation();
   return {
-    body, original, scrolls, cleanup: () => cleanup(),
+    body, original, scrolls, focused, cleanup: () => cleanup(),
     show(menu) {
       document.dialogs = menu === null ? [] : [{
         getClientRects: () => [1],
         matches: (selector) => selector.split(',').some((part) => part.trim() === `.${menu === true ? 'card-menu' : menu}`),
-        focus() {}, setAttribute() {}, hasAttribute: () => true,
+        focus() { focused.push(menu); }, setAttribute() {}, hasAttribute: () => true,
       }];
       update();
     },
   };
 }
+
+test('Add media stays non-modal so its trigger and outside controls remain usable', () => {
+  const app = mount();
+  app.show('folder-tools-menu');
+  assert.deepEqual(app.focused, []);
+  assert.deepEqual(app.body.style, app.original);
+  app.cleanup();
+});
 
 for (const menu of ['card-menu', 'folder-tools-menu', 'account-popover', 'folder-context-menu']) {
 test(`opening and closing ${menu} leaves body sizing and scroll untouched`, () => {

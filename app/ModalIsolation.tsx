@@ -29,7 +29,7 @@ export default function ModalIsolation() {
     };
     const update = () => {
       const dialogs = [...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"], .account-popover, .folder-context-menu, .folder-create-modal, .profile-settings-modal')].filter(el => el.getClientRects().length);
-      const next = dialogs.at(-1) ?? null;
+      const next = dialogs.filter(el => !el.matches(".folder-tools-menu")).at(-1) ?? null;
       const desired = new Set<HTMLElement>();
       if (next) {
         let branch: HTMLElement = next;
