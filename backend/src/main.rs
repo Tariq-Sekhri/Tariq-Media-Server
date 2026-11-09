@@ -14157,9 +14157,11 @@ fn preview_color_repair(codec: &str, color_space: &str) -> Option<&'static str> 
     }
 }
 
-fn timeline_preview_filter(duration: f64) -> String {
-    let sampling = if duration < TRICKPLAY_INTERVAL_SECONDS {
+fn timeline_preview_filter(duration: Option<f64>) -> String {
+    let sampling = if duration.is_some_and(|duration| duration < TRICKPLAY_INTERVAL_SECONDS) {
         "select=eq(n\\,0)".to_owned()
+    } else if duration.is_none() {
+        format!("fps=1/{TRICKPLAY_INTERVAL_SECONDS}:round=up")
     } else {
         format!("fps=1/{TRICKPLAY_INTERVAL_SECONDS}")
     };
@@ -14250,14 +14252,17 @@ async fn generate_trickplay_video(
         .and_then(|probe| probe["format"]["duration"].as_str())
         .and_then(|text| text.parse::<f64>().ok())
         .filter(|value| value.is_finite() && *value > 0.0);
-    let Some(duration) = duration else {
+    if probe_json.as_ref().and_then(|probe| probe["streams"].as_array()).is_none() {
         match probe {
             Ok(output) => tracing::warn!(library, video_path, exit_code = ?output.status.code(), stderr = %String::from_utf8_lossy(&output.stderr), stdout = %String::from_utf8_lossy(&output.stdout), "Timeline-preview duration probe failed"),
             Err(error) => tracing::warn!(library, video_path, %error, "Could not launch timeline-preview probe"),
         }
         return TrickplayVideoResult::Failed;
-    };
-    if trickplay_is_complete(&output_dir, Some(duration)) {
+    }
+    if duration.is_none() {
+        tracing::info!(library, video_path, "Generating timeline previews without duration metadata");
+    }
+    if trickplay_is_complete(&output_dir, duration) {
         return TrickplayVideoResult::AlreadyGenerated;
     }
     if let Err(error) = tokio::fs::create_dir_all(&output_dir).await {
@@ -14313,7 +14318,7 @@ async fn generate_trickplay_video(
             trickplay.current_video = Some(video_path.clone());
             trickplay.current_output_dir = Some(output_dir.clone());
             trickplay.current_video_started_at = Some(unix_now());
-            trickplay.current_expected_frames = Some(trickplay_expected_frames(duration));
+            trickplay.current_expected_frames = duration.map(trickplay_expected_frames);
         }
     }
     let status = child.wait().await;
@@ -14332,7 +14337,7 @@ async fn generate_trickplay_video(
     }
     let succeeded = status.as_ref().is_ok_and(|value| value.success());
     let frames = trickplay_frames_on_disk(&output_dir);
-    tracing::info!(library = %library, video_path = %video_path, pid = ?pid, success = succeeded, frames = frames.0, expected_frames = trickplay_expected_frames(duration), "Finished FFmpeg timeline-preview generation");
+    tracing::info!(library = %library, video_path = %video_path, pid = ?pid, success = succeeded, frames = frames.0, expected_frames = ?duration.map(trickplay_expected_frames), "Finished FFmpeg timeline-preview generation");
     // The marker records the frame FFmpeg actually wrote last, so a rerun never
     // depends on predicting that count a second time.
     match frames.1.filter(|_| succeeded) {
@@ -14341,7 +14346,7 @@ async fn generate_trickplay_video(
             TrickplayVideoResult::Generated
         }
         None => {
-            tracing::warn!(library, video_path, pid = ?pid, exit_code = ?status.as_ref().ok().and_then(|status| status.code()), wait_error = ?status.as_ref().err(), frames = frames.0, expected_frames = trickplay_expected_frames(duration), %stderr, "FFmpeg timeline-preview generation failed");
+            tracing::warn!(library, video_path, pid = ?pid, exit_code = ?status.as_ref().ok().and_then(|status| status.code()), wait_error = ?status.as_ref().err(), frames = frames.0, expected_frames = ?duration.map(trickplay_expected_frames), %stderr, "FFmpeg timeline-preview generation failed");
             TrickplayVideoResult::Failed
         }
     }
@@ -19640,12 +19645,19 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let frame = root.join("00000000.jpg");
         let output = hidden_sync_command(&ffmpeg)
-            .args(["-v", "error", "-threads", "1", "-filter_threads", "1", "-f", "lavfi", "-i", "color=c=black:s=32x32:d=1", "-vf", &timeline_preview_filter(1.0), "-q:v", "5"])
+            .args(["-v", "error", "-threads", "1", "-filter_threads", "1", "-f", "lavfi", "-i", "color=c=black:s=32x32:d=1", "-vf", &timeline_preview_filter(Some(1.0)), "-q:v", "5"])
             .arg(&frame).output().unwrap();
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let image = image::open(frame).unwrap();
+        let image = image::open(&frame).unwrap();
         assert_eq!(image.width(), 960);
         assert!(image.height() > 0);
+        let unknown_duration_frame = root.join("unknown-duration.jpg");
+        let output = hidden_sync_command(&ffmpeg)
+            .args(["-v", "error", "-threads", "1", "-filter_threads", "1", "-i"])
+            .arg(&frame).args(["-vf", &timeline_preview_filter(None), "-q:v", "5"])
+            .arg(&unknown_duration_frame).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(image::open(unknown_duration_frame).unwrap().width(), 960);
         std::fs::remove_dir_all(root).unwrap();
     }
 
