@@ -3,6 +3,15 @@ const assert = require('node:assert/strict');
 const { load } = require('./load-ts.cjs');
 const work = load('app/lib/running-work.ts');
 
+test('library scans are active with unknown progress until remuxing starts', () => {
+  assert.equal(work.isActiveWork('scanning library'), true);
+  assert.equal(work.isFinishedWork('scanning library'), false);
+  assert.equal(work.workProgress('scanning library', 0), null);
+  assert.equal(work.workProgress('running', 0), 0);
+  assert.equal(work.workProgress('running', 0.5), 0.5);
+  assert.equal(work.workProgress('complete', 1), 1);
+});
+
 test('paused and unavailable work count as inactive; failed finishes still need attention', () => {
   for (const status of ['paused', 'status unavailable', 'waiting for computer idle', 'waiting for worker']) {
     assert.equal(work.isActiveWork(status), false);

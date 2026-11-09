@@ -5,7 +5,7 @@ import { useAppConfirm } from "../AppConfirmProvider";
 import { API_BASE } from "../lib/media";
 import { authFetch, canAccessAdminPanel, clearSession, emptyAdminPermissions, getSessionUser, hasAdminPermission, logOut, reportClientPerformance, type AdminPermissions } from "../lib/auth";
 import type { YtDlpJob } from "../ServerDownloadDialog";
-import { isActiveWork, isFinishedWork, needsWorkAttention, workTitle } from "../lib/running-work";
+import { isActiveWork, isFinishedWork, needsWorkAttention, workProgress, workTitle } from "../lib/running-work";
 import MenuIcon from "../MenuIcon";
 import AdminTrash from "./Trash";
 import LibrariesOptions, { LibrariesLayoutPicker, useLibrariesLayout } from "./LibrariesOptions";
@@ -1545,15 +1545,20 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
             const isYtDlp = process.id.startsWith("ytdlp:");
             const isFailed = needsWorkAttention(process.status);
             const isLive = isActiveWork(process.status);
+            const isScanning = process.status === "scanning library";
+            const progress = workProgress(process.status, process.progress);
+            const detail = isScanning && process.id.startsWith("browser-media:")
+              ? "Scanning library for incompatible audio"
+              : process.detail;
             const isComplete = isFinishedWork(process.status);
             const statusIndicator = isFailed ? "failed" : isLive ? "live" : isComplete ? "complete" : "queued";
-            const progressEta = isLive && !process.eta && process.eta_seconds == null
-              ? estimateEtaFromProgress(process.progress, process.started_at, processClock)
+            const progressEta = isLive && !isScanning && !process.eta && process.eta_seconds == null
+              ? estimateEtaFromProgress(progress, process.started_at, processClock)
               : null;
-            const etaSeconds = process.eta_seconds ?? progressEta;
-            const estCompletion = formatEstimatedCompletion(etaSeconds, process.eta);
+            const etaSeconds = isScanning ? null : process.eta_seconds ?? progressEta;
+            const estCompletion = isScanning ? null : formatEstimatedCompletion(etaSeconds, process.eta);
             const etaHeading = process.id.startsWith("trickplay:") && process.eta_seconds != null ? "Item ETA" : "ETA";
-            const etaLabel = process.transfer ? null : process.eta ?? (etaSeconds != null
+            const etaLabel = process.transfer || isScanning ? null : process.eta ?? (etaSeconds != null
               ? formatEta(etaSeconds)
               : isLive ? (process.kind === "FFmpeg transcode" ? "Ongoing" : "Calculating") : null);
             const avgDownloadTime = formatAvgDownloadTime(process.avg_item_seconds);
@@ -1614,8 +1619,8 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
                       </div>
                     </div>
                   ) : (
-                    <small title={process.detail}>
-                      {process.detail}
+                    <small title={detail}>
+                      {detail}
                       {etaLabel ? ` · ${etaHeading} ${etaLabel}` : ""}
                       {estCompletion ? ` · Est. ${etaHeading === "Item ETA" ? "item done" : "complete"} ${estCompletion}` : ""}
                     </small>
@@ -1633,10 +1638,10 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
                 </div>
                 <div className="admin-process-owner"><span>{process.user_name ? process.user_name.slice(0, 2).toUpperCase() : "SV"}</span><small>{process.user_name ?? "Server"}</small></div>
                 <div className="admin-process-state">
-                  <b>{process.paused_until && process.paused_until * 1000 > processClock ? `Paused until ${new Date(process.paused_until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : process.status}{process.progress !== null ? ` · ${Math.round(process.progress * 100)}%` : ""}</b>
+                  <b>{process.paused_until && process.paused_until * 1000 > processClock ? `Paused until ${new Date(process.paused_until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : process.status}{progress !== null ? ` · ${Math.round(progress * 100)}%` : ""}</b>
                   {isLive && process.started_at ? <small>Started {new Date(process.started_at * 1000).toLocaleString()}</small> : null}
                   {process.pid !== null && <strong className="admin-process-pid">PID {process.pid}</strong>}
-                  {process.progress !== null && <progress max="1" value={process.progress} />}
+                  {progress !== null && <progress max="1" value={progress} />}
                   {process.actions.length > 0 && <span className="admin-row-actions">
                     {process.actions.map((action) => {
                       const isBusy = processAction === `${process.id}:${action}`;
