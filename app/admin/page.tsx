@@ -161,6 +161,15 @@ const formatBytes = (bytes: number | null | undefined) => {
   const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   return `${(bytes / 1024 ** unit).toFixed(unit >= 3 ? 1 : 0)} ${units[unit]}`;
 };
+function UserStorage({ user }: { user: AdminUser }) {
+  const summary = `${formatBytes(user.used_bytes)} used${user.reserved_bytes > 0 ? `, ${formatBytes(user.reserved_bytes)} reserved` : ""}, ${user.storage_quota_bytes === null ? "unlimited" : `${formatBytes(user.storage_quota_bytes)} limit`}`;
+  return <div className="admin-user-storage" title={summary}>
+    <small>{formatBytes(user.used_bytes)} used &middot; {formatBytes(user.storage_quota_bytes)}</small>
+    {user.reserved_bytes > 0 && <small>{formatBytes(user.reserved_bytes)} reserved</small>}
+    {user.storage_quota_bytes !== null && <progress aria-label={`${user.name} server storage`} aria-valuetext={summary} max={Math.max(1, user.storage_quota_bytes)} value={user.used_bytes + user.reserved_bytes} />}
+  </div>;
+}
+
 const performanceDetails = (line: string): Record<string, unknown> | null => {
   const quoted = line.match(/details="({.*?})"/)?.[1].replace(/\\"/g, '"');
   const raw = quoted ?? line.match(/details=({.*?})(?:\s|$)/)?.[1];
@@ -470,7 +479,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
       const [metricsLogsResponse, processesResponse, usersResponse, librariesResponse, locationsResponse, downloadsResponse] = await Promise.all([
         section === "metrics" && canViewLogs ? authFetch(`${API_BASE}/api/admin/performance`) : null,
         section === "processes" && canViewProcesses ? authFetch(`${API_BASE}/api/admin/processes`, { signal: AbortSignal.timeout(12_000) }) : null,
-        (section === "users" || section === "downloads") && needsUsers ? authFetch(`${API_BASE}/api/admin/users`) : null,
+        section === "users" && needsUsers ? authFetch(`${API_BASE}/api/admin/users`) : null,
         (section === "libraries" || section === "locations") && canManageLibraries ? authFetch(`${API_BASE}/api/libraries`) : null,
         section === "locations" && canManageLibraries ? authFetch(`${API_BASE}/api/admin/library-locations`) : null,
         section === "downloads" && canManageDownloads ? authFetch(`${API_BASE}/api/admin/downloads`) : null,
@@ -1277,7 +1286,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
 
       {section === "users" && <article className="admin-surface admin-users-surface admin-section-surface">
         <div className="admin-user-table-head"><span>User</span><span>Access</span><span>Password</span><span>Created</span><span>Last active</span><span /></div>
-        {loading ? <AdminLoading label="Loading users" /> : users.length ? <div className="admin-user-table">{users.map((user) => <div className="admin-user-row" key={user.id}><div className="admin-user-identity"><span>{user.name.slice(0, 2).toUpperCase()}</span><div><b>{user.name}</b><small>{formatBytes(user.used_bytes)} used · {formatBytes(user.storage_quota_bytes)}</small></div></div><span className={`admin-account-type ${user.is_admin ? "admin" : user.admin_permissions?.access_admin_panel ? "limited" : ""}`}>{accountType(user)}</span><span className={`admin-password-state ${user.password_set ? "set" : "open"}`}><i />{user.password_set ? "Protected" : "No password"}</span><time>{formatCreatedDate(user.created_at)}</time><time>{user.last_active_at ? formatCreatedDate(user.last_active_at) : "Never"}</time><span className="admin-row-actions">{canManageSessionsFor(user) && <button className="admin-row-action" onClick={() => void openUserSessions(user)}>Devices</button>}{canManageUser(user) && <button className="admin-row-action" onClick={() => openUserEditor(user)}>Manage</button>}</span></div>)}</div> : <div className="admin-panel-empty"><span>♙</span><b>No users yet</b>{canCreateUsers && <button onClick={() => setShowAddUser(true)}>Add your first user</button>}</div>}
+        {loading ? <AdminLoading label="Loading users" /> : users.length ? <div className="admin-user-table">{users.map((user) => <div className="admin-user-row" key={user.id}><div className="admin-user-identity"><span>{user.name.slice(0, 2).toUpperCase()}</span><div><b>{user.name}</b><UserStorage user={user} /></div></div><span className={`admin-account-type ${user.is_admin ? "admin" : user.admin_permissions?.access_admin_panel ? "limited" : ""}`}>{accountType(user)}</span><span className={`admin-password-state ${user.password_set ? "set" : "open"}`}><i />{user.password_set ? "Protected" : "No password"}</span><time>{formatCreatedDate(user.created_at)}</time><time>{user.last_active_at ? formatCreatedDate(user.last_active_at) : "Never"}</time><span className="admin-row-actions">{canManageSessionsFor(user) && <button className="admin-row-action" onClick={() => void openUserSessions(user)}>Devices</button>}{canManageUser(user) && <button className="admin-row-action" onClick={() => openUserEditor(user)}>Manage</button>}</span></div>)}</div> : <div className="admin-panel-empty"><span>♙</span><b>No users yet</b>{canCreateUsers && <button onClick={() => setShowAddUser(true)}>Add your first user</button>}</div>}
       </article>}
 
                   {section === "metrics" && (
@@ -1729,10 +1738,6 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
       </div>}
 
       {section === "downloads" && <div className="admin-library-list">
-        <article className="admin-surface admin-library-card">
-          <header><div><p>QUOTA OVERVIEW</p><h2>Per-user server storage</h2></div></header>
-          <div className="admin-quota-list">{users.length ? users.map((user) => <div key={user.id}><div><b>{user.name}</b><span>{formatBytes(user.used_bytes)} used · {formatBytes(user.reserved_bytes)} reserved · {formatBytes(user.storage_quota_bytes)}</span></div><progress max={Math.max(1, user.storage_quota_bytes ?? Math.max(1, user.used_bytes + user.reserved_bytes))} value={user.used_bytes + user.reserved_bytes} /></div>) : loading ? <AdminLoading label="Loading storage usage" /> : <p role="status">No user storage usage available.</p>}</div>
-        </article>
         <article className="admin-surface admin-library-card">
           <header><div><p>DOWNLOAD PACING</p><h2>yt-dlp throttling</h2></div>{throttleSaveState && <span className="admin-library-save-status" role="status">{throttleSaveState === "saving" ? "Saving…" : "Saved"}</span>}</header>
           <div className="admin-library-settings admin-ytdlp-throttle">
