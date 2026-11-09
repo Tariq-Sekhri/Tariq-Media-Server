@@ -7309,3 +7309,14 @@ thead .lib-tabs-person { background: #12171b; }
 .admin-users-surface .admin-user-row { padding-left: 0; padding-right: 0; }
 .admin-users-surface > header.admin-users-actions { justify-content: flex-end; }
 .admin-users-surface > header.admin-users-actions:empty { display: none; }
+
+/* Admin sections sit on the page background at full width, like Users and Requests. */
+.admin-workspace .admin-section-surface,
+.admin-workspace .admin-library-list,
+.admin-workspace .admin-processes-workspace { max-width: none; margin-left: 0; margin-right: 0; }
+.admin-workspace .admin-surface { border: 0; border-radius: 0; background: transparent; box-shadow: none; overflow: visible; }
+.admin-workspace .admin-surface > header { border-bottom-color: #1d2227; }
+.admin-workspace .admin-library-list { gap: 0; }
+.admin-workspace .admin-library-list > .admin-surface { border-bottom: 1px solid #1d2227; }
+.admin-workspace .admin-library-list > .admin-surface:last-of-type { border-bottom: 0; }
+.admin-workspace .admin-location-note { border: 0; border-radius: 0; background: transparent; }
