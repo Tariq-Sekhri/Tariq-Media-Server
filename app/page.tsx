@@ -6565,7 +6565,7 @@ export default function Home() {
                     <button
                       type="button"
                       className="account-admin-link"
-                      onClick={() => window.location.assign("/admin")}
+                      onClick={() => navigateApp("/admin")}
                     >
                       Admin Dashboard
                     </button>

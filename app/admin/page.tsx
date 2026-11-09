@@ -15,6 +15,7 @@ import { RequestsPanel } from "../discover/Requests";
 import "../discover/style.css";
 import "../admin-mobile.css";
 import { useBackLayer } from "../lib/back-layers";
+import { navigateApp } from "../lib/app-shell";
 
 type LogsResponse = { files: string[]; lines: string[]; actors: string[]; total_events: number; stored_events: number; total_bytes: number };
 type AdminUser = { id: number; name: string; password_set: boolean; created_at: number; last_active_at: number | null; is_admin: boolean; admin_permissions: AdminPermissions; storage_quota_bytes: number | null; used_bytes: number; reserved_bytes: number; available_bytes: number | null };
@@ -686,7 +687,8 @@ export default function AdminDashboard() {
   }, [availableSections, currentUser, refresh, section]);
 
   useEffect(() => {
-    const restoreSectionFromUrl = () => setSelectedSection(adminSectionFromUrl());
+    // Leaving Admin for the library also fires popstate; ignore it there.
+    const restoreSectionFromUrl = () => { if (window.location.pathname === "/admin") setSelectedSection(adminSectionFromUrl()); };
     restoreSectionFromUrl();
     window.addEventListener("popstate", restoreSectionFromUrl);
     return () => window.removeEventListener("popstate", restoreSectionFromUrl);
@@ -1572,7 +1574,7 @@ export default function AdminDashboard() {
                           >
                             <button
                               type="button"
-                              onClick={() => window.location.assign(`/?folder=${encodeURIComponent(process.destination_path!)}`)}
+                              onClick={() => navigateApp(`/?folder=${encodeURIComponent(process.destination_path!)}`)}
                               className="admin-ytdlp-folder-link"
                             >
                               {process.destination_path}
@@ -1675,7 +1677,7 @@ export default function AdminDashboard() {
             <p>MAIN STORAGE</p>
             <h2>
               <a href="/?section=library" onClick={(e) => e.preventDefault()} style={{ display: 'contents' }}>
-                <button type="button" onClick={() => window.location.assign("/?section=library")} style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
+                <button type="button" onClick={() => navigateApp("/?section=library")} style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
                   Main TMS folder
                 </button>
               </a>
@@ -1698,7 +1700,7 @@ export default function AdminDashboard() {
                 <p>{location.parent_library ? "LIBRARY FOLDER SHORTCUT" : "EXTERNAL LIBRARY"}</p>
                 <h2>
                   <a href={targetUrl} onClick={(e) => e.preventDefault()} style={{ display: 'contents' }}>
-                    <button type="button" onClick={() => window.location.assign(targetUrl)} style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
+                    <button type="button" onClick={() => navigateApp(targetUrl)} style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
                       {displayName}
                     </button>
                   </a>

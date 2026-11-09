@@ -9,7 +9,7 @@ export type WatchInstance = { id: string; url: string; mode: WatchMode };
 export type AppShellState = { path: string; watch: WatchInstance | null; companion?: WatchInstance | null };
 type WatchEntryState = { tmsWatchId?: string; tmsWatchFromShell?: boolean; tmsDocument?: string };
 
-const SHELL_PATHS = new Set(["/", "/search", "/watch"]);
+const SHELL_PATHS = new Set(["/", "/search", "/watch", "/admin"]);
 const SERVER_STATE: AppShellState = { path: "", watch: null };
 let state: AppShellState = SERVER_STATE;
 let enabled = false;
