@@ -7351,9 +7351,9 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 @media (prefers-reduced-motion: reduce) { .admin-loading-spinner { animation-duration: 2s; } }
 
 /* Compact quota usage stays with each account in Users. */
-.admin-user-identity .admin-user-storage { width: max-content; max-width: 100%; gap: 3px; }
+.admin-user-identity .admin-user-storage { display: grid; grid-template-columns: minmax(0, 110px) minmax(0, 100px); width: max-content; max-width: 100%; gap: 3px 12px; }
 .admin-user-storage small { white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
-.admin-user-storage progress { appearance: none; display: block; width: 200px; max-width: 100%; height: 4px; margin-top: 3px; overflow: hidden; border: 0; border-radius: 999px; background: #292e37; color: #a38ce8; accent-color: #a38ce8; }
+.admin-user-storage progress { grid-column: 1 / -1; appearance: none; display: block; width: 200px; max-width: 100%; height: 4px; margin-top: 3px; overflow: hidden; border: 0; border-radius: 999px; background: #292e37; color: #a38ce8; accent-color: #a38ce8; }
 .admin-user-storage progress::-webkit-progress-bar { border-radius: 999px; background: #292e37; }
 .admin-user-storage progress::-webkit-progress-value { border-radius: 999px; background: #a38ce8; }
 .admin-user-storage progress::-moz-progress-bar { border-radius: 999px; background: #a38ce8; }
@@ -7362,7 +7362,7 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 @media (min-width: 901px) {
   .admin-user-identity > div { flex: 1; display: grid; grid-template-columns: minmax(0, 160px) minmax(0, 1fr); align-items: center; gap: 16px; }
   .admin-user-identity > div > b { flex: none; max-width: 160px; }
-  .admin-user-identity .admin-user-storage { display: grid; width: auto; grid-template-columns: minmax(0, 190px) minmax(48px, 120px); align-items: center; justify-content: center; gap: 12px; }
+  .admin-user-identity .admin-user-storage { display: grid; width: auto; grid-template-columns: minmax(0, 110px) minmax(0, 100px) minmax(48px, 120px); align-items: center; justify-content: center; gap: 12px; }
   .admin-user-storage small { min-width: 0; text-align: left; }
-  .admin-user-storage progress { flex: 0 1 120px; min-width: 48px; width: 120px; margin-top: 0; }
+  .admin-user-storage progress { grid-column: auto; flex: 0 1 120px; min-width: 48px; width: 120px; margin-top: 0; }
 }

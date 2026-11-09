@@ -164,7 +164,8 @@ const formatBytes = (bytes: number | null | undefined) => {
 function UserStorage({ user }: { user: AdminUser }) {
   const summary = `${formatBytes(user.used_bytes)} used, ${user.storage_quota_bytes === null ? "unlimited" : `${formatBytes(user.storage_quota_bytes)} limit`}`;
   return <div className="admin-user-storage" title={summary}>
-    <small>{formatBytes(user.used_bytes)} used &middot; {formatBytes(user.storage_quota_bytes)}</small>
+    <small>{formatBytes(user.used_bytes)} used</small>
+    <small>{formatBytes(user.storage_quota_bytes)}{user.storage_quota_bytes !== null ? " total" : ""}</small>
     {user.storage_quota_bytes !== null && <progress aria-label={`${user.name} server storage`} aria-valuetext={summary} max={Math.max(1, user.storage_quota_bytes)} value={user.used_bytes} />}
   </div>;
 }
