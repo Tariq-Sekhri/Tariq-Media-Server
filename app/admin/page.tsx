@@ -6,7 +6,6 @@ import { API_BASE } from "../lib/media";
 import { authFetch, canAccessAdminPanel, clearSession, emptyAdminPermissions, getSessionUser, hasAdminPermission, logOut, reportClientPerformance, type AdminPermissions } from "../lib/auth";
 import type { YtDlpJob } from "../ServerDownloadDialog";
 import { isActiveWork, isFinishedWork, needsWorkAttention, workTitle } from "../lib/running-work";
-import DiscoverConfiguration from "../discover/Configuration";
 import MenuIcon from "../MenuIcon";
 import AdminTrash from "./Trash";
 import MobileNavigation from "../MobileNavigation";
@@ -26,7 +25,7 @@ type LibraryLocation = { name: string; path: string; external: boolean; availabl
 type LibraryLocationsResponse = { main_root: string; main_root_available: boolean; locations: LibraryLocation[] };
 type FolderBrowserResponse = { current_path: string | null; parent_path: string | null; folders: { name: string; path: string }[] };
 type DeleteRequest = { id: string; path: string; requested_by: number; requested_by_name: string; requested_at: number };
-type AdminSection = "overview" | "notifications" | "users" | "metrics" | "processes" | "locations" | "libraries" | "downloads" | "discover" | "trash";
+type AdminSection = "overview" | "notifications" | "users" | "metrics" | "processes" | "locations" | "libraries" | "downloads" | "trash";
 type AdminLoadTiming = {
   cacheState: "hit" | "miss";
   cacheLoadTimeMs: number;
@@ -47,7 +46,7 @@ const cacheAdminUsers = (userId: number | undefined, users: AdminUser[]) => {
   if (typeof window === "undefined" || !userId) return;
   try { sessionStorage.setItem(adminUsersCacheKey(userId), JSON.stringify({ savedAt: Date.now(), users })); } catch { /* Private browsing or a full session store should not block administration. */ }
 };
-const adminSections: AdminSection[] = ["overview", "notifications", "users", "metrics", "processes", "locations", "libraries", "downloads", "discover", "trash"];
+const adminSections: AdminSection[] = ["overview", "notifications", "users", "metrics", "processes", "locations", "libraries", "downloads", "trash"];
 const adminSectionFromUrl = () => {
   if (typeof window === "undefined") return "users" as AdminSection;
   const candidate = new URLSearchParams(window.location.search).get("section");
@@ -103,7 +102,6 @@ const sectionCopy: Record<AdminSection, { eyebrow: string; title: string; descri
   processes: { eyebrow: "LIVE SERVER WORK", title: "Running work", description: "Every active TMS job, across all users and server services." },
   locations: { eyebrow: "SERVER STORAGE", title: "Library locations", description: "Attach media folders from any drive without moving their contents." },
   libraries: { eyebrow: "MEDIA ACCESS", title: "Libraries", description: "Choose each library type and who can access it." },
-  discover: { eyebrow: "DISCOVER", title: "Discover configuration", description: "Catalog connection, download services, and request access." },
   downloads: { eyebrow: "SERVER TOOLS", title: "Server downloads", description: "Manage yt-dlp readiness, download pacing, and per-user storage." },
   trash: { eyebrow: "", title: "Trash", description: "" },
 };
@@ -364,7 +362,7 @@ export default function AdminDashboard() {
     ...(canViewProcesses ? ["processes" as const] : []),
     ...(canManageLibraries ? ["locations" as const] : []),
     ...(canManageLibraries ? ["libraries" as const] : []),
-    ...(canManageDownloads ? ["downloads" as const, "discover" as const] : []),
+    ...(canManageDownloads ? ["downloads" as const] : []),
     ...(currentUser?.is_admin ? ["trash" as const] : []),
   ], [canCreateUsers, canDeleteUsers, canEditUsers, canLogOutAdmins, canLogOutOtherUsers, canManageDownloads, canManageLibraries, canViewLogs, canViewProcesses, canViewUsers, currentUser?.is_admin]);
 
@@ -1224,7 +1222,6 @@ export default function AdminDashboard() {
             <button className={section === "downloads" ? "active" : ""} aria-current={section === "downloads" ? "page" : undefined} onClick={() => setSection("downloads")}><span aria-hidden="true">↓</span>Server downloads</button>
           </div>
         )}
-        {canManageDownloads && <button className={section === "discover" ? "active" : ""} aria-current={section === "discover" ? "page" : undefined} onClick={() => setSection("discover")}>Discover configuration</button>}
         {currentUser?.is_admin && <button className={section === "trash" ? "active" : ""} aria-current={section === "trash" ? "page" : undefined} onClick={() => setSection("trash")}><span aria-hidden="true">♲</span>Trash</button>}
       </nav>
     </aside>
@@ -1256,7 +1253,6 @@ export default function AdminDashboard() {
       </article>}
 
       {section === "trash" && currentUser?.is_admin && <AdminTrash />}
-      {section === "discover" && canManageDownloads && <article className="admin-surface admin-section-surface"><DiscoverConfiguration /></article>}
 
       {section === "notifications" && currentUser?.is_admin && <article className="admin-surface admin-section-surface">
         <header><div><p>DELETE REQUESTS</p><h2>Deletion requests</h2><span>Move an item to recoverable Trash or dismiss the request.</span></div></header>
