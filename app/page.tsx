@@ -2069,9 +2069,9 @@ export default function Home() {
       const backgroundLoadStarted = performance.now();
       console.log(`[Navigation] loadLibraryBackground started for folder: "${currentFolder ?? "root"}", sort: ${sort} ${sortDirection}`);
       const libraryRequest = authFetch(libraryApiUrl(sort, sortDirection, currentFolder));
-      const librariesRequest = fetch(`${API_BASE}/api/libraries`);
+      const librariesRequest = authFetch(`${API_BASE}/api/libraries`);
       const userStateRequest = authFetch(`${API_BASE}/api/user-state`);
-      const coversRequest = fetch(`${API_BASE}/api/folder-covers?t=${Date.now()}`);
+      const coversRequest = authFetch(`${API_BASE}/api/folder-covers?t=${Date.now()}`);
       
       const cacheKey = libraryCachePageKey(currentFolder, sort, sortDirection);
       console.log(`[Cache] Checking cache for user: ${sessionUser?.id}, key: "${cacheKey}"`);
@@ -4628,7 +4628,7 @@ export default function Home() {
     try {
       const response = await authFetch(`${API_BASE}/api/folder-covers`, { method: "PUT", headers: { "Content-Type": file.type, "X-Folder-Path": path }, body: file });
       if (!response.ok) throw new Error(`Server returned ${response.status}`);
-      const coversResponse = await fetch(`${API_BASE}/api/folder-covers?t=${Date.now()}`);
+      const coversResponse = await authFetch(`${API_BASE}/api/folder-covers?t=${Date.now()}`);
       if (!coversResponse.ok) throw new Error("Could not reload folder covers");
       const nextFolderCovers = await coversResponse.json() as Record<string, string>;
       setFolderCovers(nextFolderCovers);
@@ -4900,8 +4900,8 @@ export default function Home() {
         await refreshLibraryEntries(nextFolder);
         const [stateResponse, librariesResponse, coversResponse] = await Promise.all([
           authFetch(`${API_BASE}/api/user-state`),
-          fetch(`${API_BASE}/api/libraries`),
-          fetch(`${API_BASE}/api/folder-covers?t=${Date.now()}`),
+          authFetch(`${API_BASE}/api/libraries`),
+          authFetch(`${API_BASE}/api/folder-covers?t=${Date.now()}`),
         ]);
         if (stateResponse.ok) {
           const state = await stateResponse.json() as UserState;

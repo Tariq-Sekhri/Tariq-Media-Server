@@ -4958,7 +4958,13 @@ async fn release_persisted_reservation(state: &AppState, reservation_id: &str) {
     let _ = write_storage_ledger(&state.storage_path, &ledger).await;
 }
 
-async fn libraries(State(state): State<AppState>) -> Json<BTreeMap<String, LibraryConfig>> {
+async fn libraries(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<BTreeMap<String, LibraryConfig>>, StatusCode> {
+    let user = authenticated_user(&state, &headers)
+        .await
+        .ok_or(StatusCode::UNAUTHORIZED)?;
     let mut libraries = read_libraries(&state).await;
     // Older versions could persist the internal data directory as a library.
     // Do not expose it or make it a deletion target.
@@ -4998,7 +5004,74 @@ async fn libraries(State(state): State<AppState>) -> Json<BTreeMap<String, Libra
     for library in libraries.values_mut() {
         library.source_path = None;
     }
-    Json(libraries)
+    // Library managers configure every library and its members. Everyone else
+    // sees only the libraries they can view, and only their own permissions.
+    if !has_admin_capability(&user, |permissions| permissions.manage_libraries) {
+        let visible: BTreeSet<String> = libraries
+            .keys()
+            .filter(|name| can_view_library(&user, &libraries, name))
+            .cloned()
+            .collect();
+        libraries.retain(|name, _| visible.contains(name));
+        for library in libraries.values_mut() {
+            library
+                .members
+                .retain(|member| member.name.eq_ignore_ascii_case(&user.name));
+        }
+    }
+    Ok(Json(libraries))
+}
+
+/// Whether `user` may see the library named `name`. Admins see every library.
+fn can_view_library(
+    user: &StoredUser,
+    libraries: &BTreeMap<String, LibraryConfig>,
+    name: &str,
+) -> bool {
+    user.is_admin
+        || libraries.get(name).is_some_and(|library| {
+            library
+                .members
+                .iter()
+                .any(|member| member.can_view && member.name.eq_ignore_ascii_case(&user.name))
+        })
+}
+
+/// Whether `user` may see a library-relative path. A path belongs to the
+/// library named by its first segment; anything outside a library is
+/// visible to admins only.
+fn can_view_library_path(
+    user: &StoredUser,
+    libraries: &BTreeMap<String, LibraryConfig>,
+    path: &str,
+) -> bool {
+    let root = path
+        .trim_start_matches(['/', '\\'])
+        .split(['/', '\\'])
+        .next()
+        .unwrap_or("");
+    user.is_admin || (!root.is_empty() && can_view_library(user, libraries, root))
+}
+
+/// Drops every path-keyed record of a library the user can no longer view,
+/// so revoked access does not keep surfacing titles through saved state.
+fn retain_visible_user_state(
+    user: &StoredUser,
+    libraries: &BTreeMap<String, LibraryConfig>,
+    user_state: &mut UserState,
+) {
+    if user.is_admin {
+        return;
+    }
+    let visible = |path: &str| can_view_library_path(user, libraries, path);
+    user_state.favorites.retain(|path| visible(path));
+    user_state.playback.retain(|path, _| visible(path));
+    user_state.last_accessed.retain(|path, _| visible(path));
+    user_state.tags.retain(|path, _| visible(path));
+    user_state.caption_selections.retain(|path, _| visible(path));
+    for playlist in user_state.playlists.values_mut() {
+        playlist.paths.retain(|path| visible(path));
+    }
 }
 
 async fn admin_library_locations(
@@ -7425,11 +7498,12 @@ async fn user_state(
     let user = authenticated_user(&state, &headers)
         .await
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    let user_state = read_user_states(&state.user_state_path)
+    let mut user_state = read_user_states(&state.user_state_path)
         .await
         .users
         .remove(&user.id)
         .unwrap_or_default();
+    retain_visible_user_state(&user, &read_libraries(&state).await, &mut user_state);
     Ok(Json(user_state))
 }
 
@@ -7540,14 +7614,15 @@ async fn favorites(
     let user = authenticated_user(&state, &headers)
         .await
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    Ok(Json(
-        read_user_states(&state.user_state_path)
-            .await
-            .users
-            .remove(&user.id)
-            .unwrap_or_default()
-            .favorites,
-    ))
+    let libraries = read_libraries(&state).await;
+    let mut favorites = read_user_states(&state.user_state_path)
+        .await
+        .users
+        .remove(&user.id)
+        .unwrap_or_default()
+        .favorites;
+    favorites.retain(|path| can_view_library_path(&user, &libraries, path));
+    Ok(Json(favorites))
 }
 
 async fn update_favorite(
@@ -9000,8 +9075,17 @@ async fn write_user_states(path: &Path, states: &UserStates) -> StatusCode {
     }
 }
 
-async fn folder_covers(State(state): State<AppState>) -> Json<serde_json::Map<String, Value>> {
-    Json(read_all_folder_covers(&state).await)
+async fn folder_covers(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Map<String, Value>>, StatusCode> {
+    let user = authenticated_user(&state, &headers)
+        .await
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let libraries = read_libraries(&state).await;
+    let mut covers = read_all_folder_covers(&state).await;
+    covers.retain(|path, _| can_view_library_path(&user, &libraries, path));
+    Ok(Json(covers))
 }
 
 /// Folder art must be an image, not a browser-decoded video: mobile browsers
@@ -14812,6 +14896,9 @@ async fn library(
             .into_response();
     }
 
+    let Some(user) = authenticated_user(&state, &headers).await else {
+        return (StatusCode::UNAUTHORIZED, Json(Vec::<LibraryEntry>::new())).into_response();
+    };
     let scan_started_at = Instant::now();
     let requested_folder = query
         .folder
@@ -14819,6 +14906,9 @@ async fn library(
         .map(str::trim)
         .filter(|path| !path.is_empty());
     let libraries = read_libraries(&state).await;
+    if requested_folder.is_some_and(|folder| !can_view_library_path(&user, &libraries, folder)) {
+        return (StatusCode::NOT_FOUND, Json(Vec::<LibraryEntry>::new())).into_response();
+    }
     let mut entries = match cached_library_scan(
         &state,
         requested_folder.map(str::to_owned),
@@ -14829,21 +14919,18 @@ async fn library(
         Ok(entries) => entries,
         Err(status) => return (status, Json(Vec::<LibraryEntry>::new())).into_response(),
     };
+    entries.retain(|entry| can_view_library_path(&user, &libraries, &entry.path));
     annotate_catalog_entries(&mut entries, &libraries);
     let sort = query.sort.as_deref().unwrap_or("opened");
     apply_cached_library_durations(&state, &mut entries).await;
     if sort == "length" {
         populate_library_durations(&state, &mut entries).await;
     }
-    let user_state = if let Some(user) = authenticated_user(&state, &headers).await {
-        read_user_states(&state.user_state_path)
-            .await
-            .users
-            .get(&user.id)
-            .cloned()
-    } else {
-        None
-    };
+    let user_state = read_user_states(&state.user_state_path)
+        .await
+        .users
+        .get(&user.id)
+        .cloned();
     sort_library_entries(
         &mut entries,
         sort,
@@ -18717,6 +18804,82 @@ fn unique_destination_path(destination: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    fn visibility_fixture() -> (StoredUser, StoredUser, BTreeMap<String, LibraryConfig>) {
+        let viewer: StoredUser = serde_json::from_value(serde_json::json!({
+            "id": 7, "name": "Viewer", "created_at": 0, "password_hash": null, "is_admin": false
+        }))
+        .unwrap();
+        let admin: StoredUser = serde_json::from_value(serde_json::json!({
+            "id": 1, "name": "Admin", "created_at": 0, "password_hash": null, "is_admin": true
+        }))
+        .unwrap();
+        let mut shared = default_library_config("mixed".to_owned());
+        shared.members.push(LibraryMember {
+            name: "viewer".to_owned(),
+            can_view: true,
+            can_delete: false,
+            can_move: false,
+            can_create_folders: false,
+            can_upload: false,
+            can_download: false,
+            can_rename: false,
+        });
+        let mut revoked = default_library_config("mixed".to_owned());
+        revoked.members.push(LibraryMember {
+            name: "Viewer".to_owned(),
+            can_view: false,
+            can_delete: false,
+            can_move: false,
+            can_create_folders: false,
+            can_upload: false,
+            can_download: false,
+            can_rename: false,
+        });
+        let libraries = BTreeMap::from([
+            ("Shared".to_owned(), shared),
+            ("Private".to_owned(), default_library_config("mixed".to_owned())),
+            ("Revoked".to_owned(), revoked),
+        ]);
+        (viewer, admin, libraries)
+    }
+
+    #[test]
+    fn library_paths_are_visible_only_to_viewing_members() {
+        let (viewer, admin, libraries) = visibility_fixture();
+        assert!(can_view_library_path(&viewer, &libraries, "Shared/Show/episode.mkv"));
+        assert!(can_view_library_path(&viewer, &libraries, "/Shared"));
+        assert!(!can_view_library_path(&viewer, &libraries, "Private/Show/episode.mkv"));
+        assert!(!can_view_library_path(&viewer, &libraries, "Revoked/file.mp4"));
+        assert!(!can_view_library_path(&viewer, &libraries, "Unknown/file.mp4"));
+        assert!(!can_view_library_path(&viewer, &libraries, "root-file.mp4"));
+        assert!(!can_view_library_path(&viewer, &libraries, ""));
+        assert!(can_view_library_path(&admin, &libraries, "Private/Show/episode.mkv"));
+    }
+
+    #[test]
+    fn saved_user_state_hides_libraries_the_user_cannot_view() {
+        let (viewer, _, libraries) = visibility_fixture();
+        let mut user_state = UserState::default();
+        user_state.favorites = BTreeSet::from(["Shared/a.mp4".to_owned(), "Private/b.mp4".to_owned()]);
+        user_state.last_accessed = BTreeMap::from([("Private/b.mp4".to_owned(), 1), ("Shared/a.mp4".to_owned(), 2)]);
+        user_state.tags = BTreeMap::from([("Revoked/c.mp4".to_owned(), BTreeSet::from(["x".to_owned()]))]);
+        user_state.playlists.insert(
+            "p".to_owned(),
+            Playlist {
+                id: "p".to_owned(),
+                name: "Mix".to_owned(),
+                paths: BTreeSet::from(["Shared/a.mp4".to_owned(), "Private/b.mp4".to_owned()]),
+                created_at: 0,
+                updated_at: 0,
+            },
+        );
+        retain_visible_user_state(&viewer, &libraries, &mut user_state);
+        assert_eq!(user_state.favorites, BTreeSet::from(["Shared/a.mp4".to_owned()]));
+        assert_eq!(user_state.last_accessed.keys().collect::<Vec<_>>(), ["Shared/a.mp4"]);
+        assert!(user_state.tags.is_empty());
+        assert_eq!(user_state.playlists["p"].paths, BTreeSet::from(["Shared/a.mp4".to_owned()]));
+    }
+
     #[test]
     fn anime_batch_episodes_are_series_and_can_be_organized() {
         let episode = episode_name_from_release("[EMBER] The Fable - 01.mkv").unwrap();

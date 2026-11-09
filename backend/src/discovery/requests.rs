@@ -156,9 +156,10 @@ pub async fn access(
     let libraries = read_libraries(state).await;
     let policy: Policy = load(state, "discovery-policy.json").await?;
     Ok(libraries
-        .into_iter()
+        .iter()
         .filter(|(_, l)| l.content_type == "movies_tv" && !l.folder_structure_static)
-        .map(|(name, _)| {
+        .map(|(name, _)| name.clone())
+        .map(|name| {
             if user.is_admin {
                 Permission {
                     user_id: user.id,
@@ -180,6 +181,9 @@ pub async fn access(
                     })
             }
         })
+        // A library the user can neither view nor request into must not be
+        // named to them at all.
+        .filter(|permission| permission.can_request || visible(user, &libraries, &permission.library))
         .collect())
 }
 pub async fn destination(
