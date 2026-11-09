@@ -7339,3 +7339,4 @@ thead .lib-tabs-person { background: #12171b; }
 
 /* Admin inside the shared TMS header: the workspace already clears the header. */
 .admin-shell.admin-embedded { min-height: 0; padding-top: 0; padding-bottom: 0; background: transparent; }
+.admin-workspace .admin-metrics-surface.admin-section-surface { margin-top: 4px !important; }

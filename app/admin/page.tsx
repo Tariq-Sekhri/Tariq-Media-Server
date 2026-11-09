@@ -1413,7 +1413,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
                 const validPoints = points.map(p => p[dataKey]).filter(v => v !== null) as number[];
                 const visualMax = Math.max(0.1, Math.min(Math.max(...validPoints), p99 * 1.5));
                 const width = 300;
-                const height = 60;
+                const height = 40;
                 let path = "";
                 let started = false;
                 
@@ -1432,12 +1432,12 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
                 });
                 
                 return (
-                  <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', opacity: 0.5, marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <div style={{ marginTop: '0.5rem', borderTop: '1px solid var(--border)', paddingTop: '0.4rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', opacity: 0.5, marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       <span>Timeline</span>
                       <span style={{ color }}>Lower is better ↓</span>
                     </div>
-                    <svg width="100%" height="60" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ overflow: 'visible' }}>
+                    <svg width="100%" height="40" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ overflow: 'visible' }}>
                       <path d={path} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
                     </svg>
                   </div>
@@ -1447,68 +1447,68 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
               return (
                 <>
                   {actionSummaries.length > 0 && (
-                    <div style={{ margin: "0.5rem 1.5rem 0", padding: "1rem", border: "1px solid var(--border)", borderRadius: "8px", background: "var(--surface-sunken)" }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "0.7rem" }}>
-                        {actionSummaries.map((summary) => <div key={summary.phase} style={{ padding: "0.75rem", border: "1px solid var(--border)", borderRadius: "6px" }}>
+                    <div style={{ margin: "0.5rem 0 0" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "0.5rem" }}>
+                        {actionSummaries.map((summary) => <div key={summary.phase} style={{ padding: "0.5rem 0.75rem", border: "1px solid var(--border)", borderRadius: "6px" }}>
                           <b style={{ display: "block", textTransform: "capitalize" }}>{summary.phase.replace("media_", "").replace("trash_", "trash ").replaceAll("_", " ")}</b>
-                          <span style={{ display: "block", fontSize: "1.25rem", marginTop: "0.25rem" }}>{summary.average.toFixed(0)}ms</span>
+                          <span style={{ display: "block", fontSize: "1.1rem", marginTop: "0.1rem" }}>{summary.average.toFixed(0)}ms</span>
                           <small>{summary.count} attempts · p95 {summary.p95.toFixed(0)}ms</small>
-                          <small style={{ display: "block", color: summary.errors ? "#ef4444" : "var(--muted)", marginTop: "0.18rem" }}>{summary.errorRate.toFixed(1)}% errors ({summary.errors})</small>
+                          <small style={{ display: "block", color: summary.errors ? "#ef4444" : "var(--muted)", marginTop: "0.1rem" }}>{summary.errorRate.toFixed(1)}% errors ({summary.errors})</small>
                         </div>)}
                       </div>
                     </div>
                   )}
-                <div className="admin-metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', padding: '1.5rem' }}>
+                <div className="admin-metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '0.5rem', padding: '0.5rem 0 0' }}>
                   
-                  <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Cache Read Time</div>
-                    <div style={{ fontSize: '2.5rem', fontWeight: 600 }}>{avgCacheTime.toFixed(1)}<span style={{ fontSize: '1.25rem', opacity: 0.5 }}>ms</span></div>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--brand)', marginTop: '0.25rem' }}>99th Percentile: {p99Cache.toFixed(1)}ms</div>
-                    <div style={{ fontSize: '0.85rem', opacity: 0.5, marginTop: '0.5rem', flex: 1 }}>Client IndexedDB read time (Network-free)</div>
+                  <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.15rem' }}>Cache Read Time</div>
+                    <div style={{ fontSize: '1.8rem', fontWeight: 600, lineHeight: 1.15 }}>{avgCacheTime.toFixed(1)}<span style={{ fontSize: '1rem', opacity: 0.5 }}>ms</span></div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--brand)', marginTop: '0.1rem' }}>99th Percentile: {p99Cache.toFixed(1)}ms</div>
+                    <div style={{ fontSize: '0.85rem', opacity: 0.5, marginTop: '0.2rem', flex: 1 }}>Client IndexedDB read time (Network-free)</div>
                     <Sparkline dataKey="cache" color="#3b82f6" p99={p99Cache} />
                   </div>
 
-                  <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Server API Load</div>
-                    <div style={{ fontSize: '2.5rem', fontWeight: 600 }}>{avgServerTime.toFixed(1)}<span style={{ fontSize: '1.25rem', opacity: 0.5 }}>ms</span></div>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--brand)', marginTop: '0.25rem' }}>99th Percentile: {p99Api.toFixed(1)}ms</div>
-                    <div style={{ fontSize: '0.85rem', opacity: 0.5, marginTop: '0.5rem', flex: 1 }}>Time for /api/library to respond over network</div>
+                  <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.15rem' }}>Server API Load</div>
+                    <div style={{ fontSize: '1.8rem', fontWeight: 600, lineHeight: 1.15 }}>{avgServerTime.toFixed(1)}<span style={{ fontSize: '1rem', opacity: 0.5 }}>ms</span></div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--brand)', marginTop: '0.1rem' }}>99th Percentile: {p99Api.toFixed(1)}ms</div>
+                    <div style={{ fontSize: '0.85rem', opacity: 0.5, marginTop: '0.2rem', flex: 1 }}>Time for /api/library to respond over network</div>
                     <Sparkline dataKey="server" color="#ef4444" p99={p99Api} />
                   </div>
 
-                  <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Image Load Time</div>
-                    <div style={{ fontSize: '2.5rem', fontWeight: 600 }}>{avgImage.toFixed(1)}<span style={{ fontSize: '1.25rem', opacity: 0.5 }}>ms</span></div>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--brand)', marginTop: '0.25rem' }}>99th Percentile: {p99Image.toFixed(1)}ms</div>
-                    <div style={{ fontSize: '0.85rem', opacity: 0.5, marginTop: '0.5rem', flex: 1 }}>Actual completed image loads, including cache, server, and invisible preloads</div>
+                  <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.15rem' }}>Image Load Time</div>
+                    <div style={{ fontSize: '1.8rem', fontWeight: 600, lineHeight: 1.15 }}>{avgImage.toFixed(1)}<span style={{ fontSize: '1rem', opacity: 0.5 }}>ms</span></div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--brand)', marginTop: '0.1rem' }}>99th Percentile: {p99Image.toFixed(1)}ms</div>
+                    <div style={{ fontSize: '0.85rem', opacity: 0.5, marginTop: '0.2rem', flex: 1 }}>Actual completed image loads, including cache, server, and invisible preloads</div>
                     <Sparkline dataKey="image" color="#8b5cf6" p99={p99Image} />
                   </div>
 
-                  <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Completed Library Load</div>
-                    <div style={{ fontSize: '2.5rem', fontWeight: 600 }}>{avgTotal.toFixed(1)}<span style={{ fontSize: '1.25rem', opacity: 0.5 }}>ms</span></div>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--brand)', marginTop: '0.25rem' }}>99th Percentile: {p99Total.toFixed(1)}ms</div>
-                    <div style={{ fontSize: '0.85rem', opacity: 0.5, marginTop: '0.5rem', flex: 1 }}>End-to-end time until visible images are decoded and painted</div>
+                  <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.15rem' }}>Completed Library Load</div>
+                    <div style={{ fontSize: '1.8rem', fontWeight: 600, lineHeight: 1.15 }}>{avgTotal.toFixed(1)}<span style={{ fontSize: '1rem', opacity: 0.5 }}>ms</span></div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--brand)', marginTop: '0.1rem' }}>99th Percentile: {p99Total.toFixed(1)}ms</div>
+                    <div style={{ fontSize: '0.85rem', opacity: 0.5, marginTop: '0.2rem', flex: 1 }}>End-to-end time until visible images are decoded and painted</div>
                     <Sparkline dataKey="total" color="#f59e0b" p99={p99Total} />
                   </div>
 
-                  <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Video Start Time</div>
-                    <div style={{ fontSize: '2.5rem', fontWeight: 600 }}>{avgVideo.toFixed(1)}<span style={{ fontSize: '1.25rem', opacity: 0.5 }}>ms</span></div>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--brand)', marginTop: '0.25rem' }}>99th Percentile: {p99Video.toFixed(1)}ms</div>
-                    <div style={{ fontSize: '0.85rem', opacity: 0.5, marginTop: '0.5rem', flex: 1 }}>Time from clicking a video until playback begins</div>
+                  <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.15rem' }}>Video Start Time</div>
+                    <div style={{ fontSize: '1.8rem', fontWeight: 600, lineHeight: 1.15 }}>{avgVideo.toFixed(1)}<span style={{ fontSize: '1rem', opacity: 0.5 }}>ms</span></div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--brand)', marginTop: '0.1rem' }}>99th Percentile: {p99Video.toFixed(1)}ms</div>
+                    <div style={{ fontSize: '0.85rem', opacity: 0.5, marginTop: '0.2rem', flex: 1 }}>Time from clicking a video until playback begins</div>
                     <Sparkline dataKey="video" color="#10b981" p99={p99Video} />
                   </div>
 
-                  <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-                    <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>Global Cache Hit Rate</div>
+                  <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+                    <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Global Cache Hit Rate</div>
                     
-                    <div style={{ position: 'relative', width: '120px', height: '120px', marginBottom: '1rem' }}>
+                    <div style={{ position: 'relative', width: '84px', height: '84px', marginBottom: '0.5rem' }}>
                       <svg viewBox="0 0 36 36" style={{ width: '100%', height: '100%', transform: 'rotate(-90deg)' }}>
                         <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--border)" strokeWidth="3" />
                         <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--brand)" strokeWidth="3" strokeDasharray={`${hitRate}, 100`} />
                       </svg>
-                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', fontWeight: 600 }}>
+                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', fontWeight: 600 }}>
                         {hitRate.toFixed(0)}%
                       </div>
                     </div>
