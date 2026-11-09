@@ -1158,7 +1158,9 @@ export default function AdminDashboard() {
       </div>
     </details>
   </section>;
+  const metricDeviceClasses = section === "metrics" ? [...new Set(metricsLogs.lines.map((line) => performanceDetails(line)?.device_class).filter((value): value is string => typeof value === "string"))].sort() : [];
   const headerActions = <>
+            {section === "metrics" && <select className="admin-metrics-device" aria-label="Device" value={metricDeviceFilter} onChange={(event) => setMetricDeviceFilter(event.target.value)}><option value="all">All devices</option>{metricDeviceClasses.map((device) => <option value={device} key={device}>{device[0].toUpperCase() + device.slice(1)}</option>)}</select>}
             {section === "users" && canCreateUsers && <button className="admin-primary-action" type="button" onClick={() => setShowAddUser(true)}>＋ Add user</button>}
             {section === "metrics" && currentUser?.is_admin && <button type="button" className="admin-clear-metrics-action" disabled={loading || clearingMetrics} onClick={() => void clearMetrics()}>{clearingMetrics ? "Wiping…" : "Wipe all metrics"}</button>}
             {section === "locations" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={openAddLocation}>Add folder</button>}
@@ -1274,12 +1276,6 @@ export default function AdminDashboard() {
 
                   {section === "metrics" && (
         <article className="admin-surface admin-section-surface admin-metrics-surface">
-          <header>
-            <div>
-              <p>PERFORMANCE DASHBOARD</p>
-              <h2>Client-Side Library Load Times</h2>
-            </div>
-          </header>
           {metricsClearMessage && <p className="admin-metrics-clear-message" role="status">{metricsClearMessage}</p>}
           {loading ? (
             <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading metrics</b></div>
@@ -1298,7 +1294,6 @@ export default function AdminDashboard() {
               const mediaActions: { phase: string; durationMs: number; outcome: "success" | "error" }[] = [];
               const timeSeriesData: { time: number; cache?: number; server?: number; video?: number; image?: number; total?: number }[] = [];
 
-              const deviceClasses = [...new Set(metricsLogs.lines.map((line) => performanceDetails(line)?.device_class).filter((value): value is string => typeof value === "string"))].sort();
               metricsLogs.lines.forEach(line => {
                 const details = performanceDetails(line);
                 if (details && (metricDeviceFilter === "all" || details.device_class === metricDeviceFilter)) {
@@ -1448,11 +1443,6 @@ export default function AdminDashboard() {
 
               return (
                 <>
-                  <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 1.5rem", marginTop: "-0.25rem" }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: "0.55rem", fontSize: "0.8rem", color: "var(--muted)" }}>Device
-                      <select value={metricDeviceFilter} onChange={(event) => setMetricDeviceFilter(event.target.value)}><option value="all">All devices</option>{deviceClasses.map((device) => <option value={device} key={device}>{device[0].toUpperCase() + device.slice(1)}</option>)}</select>
-                    </label>
-                  </div>
                   {actionSummaries.length > 0 && (
                     <div style={{ margin: "1.25rem 1.5rem 0", padding: "1rem", border: "1px solid var(--border)", borderRadius: "8px", background: "var(--surface-sunken)" }}>
                       <div style={{ marginBottom: "0.8rem" }}><b>Media transactions</b><div style={{ fontSize: "0.8rem", color: "var(--muted)", marginTop: "0.2rem" }}>End-to-end browser timings and failure rates from client performance events.</div></div>

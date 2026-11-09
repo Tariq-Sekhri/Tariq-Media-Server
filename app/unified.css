@@ -7334,3 +7334,5 @@ thead .lib-tabs-person { background: #12171b; }
   .admin-user-row > time { display: none; }
   .admin-user-row > .admin-row-actions { grid-column: 1 / -1; justify-content: flex-start; }
 }
+.admin-page-header-actions .admin-metrics-device { min-height: 33px; border: 1px solid #2d343a; border-radius: 8px; padding: 0 10px; background: #13171b; color: #d5dade; font: inherit; font-size: 13px; color-scheme: dark; }
+@media (pointer: coarse) { .admin-page-header-actions .admin-metrics-device { min-height: 48px; font-size: 15px; } }
