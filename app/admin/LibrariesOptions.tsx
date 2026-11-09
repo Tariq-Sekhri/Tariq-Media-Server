@@ -48,8 +48,6 @@ type Ctx = LibrariesOptionProps & {
   status: (path: string) => string;
 };
 
-const openLibrary = (path: string) => window.location.assign(`/?folder=${encodeURIComponent(path)}`);
-
 function TypeSelect({ ctx, path }: { ctx: Ctx; path: string }) {
   return <select aria-label={`Library type for ${path}`} value={ctx.libraries[path].content_type} onChange={(event) => ctx.update(path, (library) => ({ ...library, content_type: event.target.value as ContentType }))}>
     {ctx.types.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
@@ -90,10 +88,6 @@ function LibraryIndex({ ctx, path, onSelect, rich }: { ctx: Ctx; path: string; o
   })}</nav>;
 }
 
-function DetailHeader({ ctx, path }: { ctx: Ctx; path: string }) {
-  return <header><h2><button type="button" className="lib-opt-title" onClick={() => openLibrary(path)}>{path}</button></h2>{ctx.status(path) && <span role="status">{ctx.status(path)}</span>}</header>;
-}
-
 function PresetButtons({ ctx, path, name }: { ctx: Ctx; path: string; name: string }) {
   if (ctx.isAdmin(name)) return <span className="lib-opt-admin">Full access</span>;
   const preset = ctx.presetOf(ctx.memberOf(path, name));
@@ -110,10 +104,9 @@ function SideBySide(ctx: Ctx) {
   return <div className="lib-opt-split">
     <LibraryIndex ctx={ctx} path={path} onSelect={select} rich />
     <article className="admin-surface lib-opt-detail">
-      <DetailHeader ctx={ctx} path={path} />
       <div className="lib-opt-columns">
         <section className="lib-opt-stack">
-          <h3>Settings</h3>
+          <h3>Settings {ctx.status(path) && <span className="lib-opt-save-status" role="status">{ctx.status(path)}</span>}</h3>
           <label className="lib-opt-field is-stacked"><span>Type</span><TypeSelect ctx={ctx} path={path} /></label>
           <Switch label="Static folders" checked={library.folder_structure_static} onChange={(checked) => ctx.update(path, (current) => ({ ...current, folder_structure_static: checked }))} />
           <Switch label="Timeline previews" checked={library.trickplay_enabled} onChange={(checked) => ctx.update(path, (current) => ({ ...current, trickplay_enabled: checked }))} />

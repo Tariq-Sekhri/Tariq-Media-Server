@@ -7195,8 +7195,6 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 @media (max-width: 700px) { .admin-trash-list li { grid-template-columns: 22px minmax(0,1fr) auto; } .admin-trash-list li > .admin-danger-action { grid-column: 2 / -1; justify-self: start; } .admin-trash-list li > button { min-height: 40px; } }
 
 /* Libraries settings and access. */
-.lib-opt-title { border: 0; padding: 0; background: none; color: #eef1f3; font: inherit; font-weight: 800; text-align: left; cursor: pointer; }
-.lib-opt-title:hover { color: #c9bfff; }
 .lib-opt-field { display: flex; align-items: center; gap: 8px; color: #9aa4ac; font-size: 13px; }
 .lib-opt-switch { display: inline-flex; align-items: center; gap: 7px; color: #c3cacf; font-size: 13px; cursor: pointer; }
 .lib-opt-switch input { width: 16px; height: 16px; accent-color: #806bea; }
@@ -7220,9 +7218,7 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 .lib-opt-index button:hover { background: #1a1f25; }
 .lib-opt-index button.active { background: #251f47; }
 .lib-opt-detail { display: flex; flex-direction: column; gap: 16px; }
-.lib-opt-detail > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.lib-opt-detail > header h2 { margin: 0; font-size: 20px; }
-.lib-opt-detail > header span { color: #8fd8a9; font-size: 12px; font-weight: 700; }
+.lib-opt-save-status { margin-left: 8px; color: #8fd8a9; font-size: 12px; font-weight: 700; }
 .lib-opt-detail h3 { margin: 0 0 -8px; color: #c3cacf; font-size: 13px; }
 .lib-opt-detail h3 small { margin-left: 6px; color: #7f8a92; font-weight: 600; }
 .lib-opt-flags { display: flex; gap: 5px; margin-top: 3px; }
@@ -7247,7 +7243,6 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
   .lib-opt-stack { border-right: 0; padding-right: 0; }
   .lib-opt-access li,.lib-opt-access.is-buttons li { grid-template-columns: 28px minmax(0, 1fr) auto; }
   .lib-opt-access li > .lib-opt-chips,.lib-opt-access.is-buttons li > .lib-opt-seg { grid-column: 2 / -1; }
-  .lib-opt-detail > header { flex-wrap: wrap; }
 }
 
 /* Requests: two plain columns on the page background. */
@@ -7326,3 +7321,7 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 .admin-insight-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
 .admin-insight-split > div { min-width: 0; }
 .admin-insights section { min-width: 0; overflow-x: auto; }
+
+/* Libraries: keep the workspace closer to its left edge. */
+.admin-workspace:has(> .lib-opt-split) { padding-left: clamp(8px, 1.333333vw, 19.333333px); }
+@media (max-width: 760px) { .admin-workspace:has(> .lib-opt-split) { padding-left: calc(14px / 3); } }
