@@ -13,9 +13,19 @@ export default function ModalIsolation() {
     let previousPosition = "";
     let previousTop = "";
     let previousWidth = "";
+    let scrollLocked = false;
     const hidden = new Map<HTMLElement, InertState>();
     const restore = () => {
       reconcileModalInert(hidden, new Set());
+    };
+    const unlockScroll = () => {
+      if (!scrollLocked) return;
+      document.body.style.overflow = previousOverflow;
+      document.body.style.position = previousPosition;
+      document.body.style.top = previousTop;
+      document.body.style.width = previousWidth;
+      window.scrollTo(0, scrollY);
+      scrollLocked = false;
     };
     const update = () => {
       const dialogs = [...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"], .account-popover, .folder-context-menu, .folder-create-modal, .profile-settings-modal')].filter(el => el.getClientRects().length);
@@ -32,25 +42,26 @@ export default function ModalIsolation() {
         }
       }
       reconcileModalInert(hidden, desired);
+      // Context menus float over the current layout. Fixing the body can
+      // change the grid's available width and reflow the cards underneath.
+      const shouldLockScroll = Boolean(next && !next.matches(".card-menu"));
+      if (shouldLockScroll && !scrollLocked) {
+        scrollY = window.scrollY;
+        previousOverflow = document.body.style.overflow;
+        previousPosition = document.body.style.position;
+        previousTop = document.body.style.top;
+        previousWidth = document.body.style.width;
+        document.body.style.overflow = "hidden";
+        document.body.style.position = "fixed";
+        document.body.style.top = `-${scrollY}px`;
+        document.body.style.width = "100%";
+        scrollLocked = true;
+      } else if (!shouldLockScroll) {
+        unlockScroll();
+      }
       if (next !== active) {
         if (!active && next) {
           returnFocus = document.activeElement as HTMLElement;
-          scrollY = window.scrollY;
-          previousOverflow = document.body.style.overflow;
-          previousPosition = document.body.style.position;
-          previousTop = document.body.style.top;
-          previousWidth = document.body.style.width;
-          document.body.style.overflow = "hidden";
-          document.body.style.position = "fixed";
-          document.body.style.top = `-${scrollY}px`;
-          document.body.style.width = "100%";
-        }
-        if (active && !next) {
-          document.body.style.overflow = previousOverflow;
-          document.body.style.position = previousPosition;
-          document.body.style.top = previousTop;
-          document.body.style.width = previousWidth;
-          window.scrollTo(0, scrollY);
         }
         active = next;
         if (next) {
@@ -72,13 +83,7 @@ export default function ModalIsolation() {
     update();
     return () => {
       observer.disconnect(); document.removeEventListener("focusin", trapFocus); restore();
-      if (active) {
-        document.body.style.overflow = previousOverflow;
-        document.body.style.position = previousPosition;
-        document.body.style.top = previousTop;
-        document.body.style.width = previousWidth;
-        window.scrollTo(0, scrollY);
-      }
+      unlockScroll();
     };
   }, []);
   return null;
