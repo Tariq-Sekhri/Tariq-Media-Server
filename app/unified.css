@@ -7220,8 +7220,9 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 .lib-opt-chips button { border: 1px solid #30373e; border-radius: 999px; padding: 4px 10px; background: transparent; color: #7f8a92; font-size: 12px; font-weight: 700; cursor: pointer; }
 .lib-opt-chips button.on { border-color: #5a4bb8; background: #221d40; color: #ddd6ff; }
 /* Library list and detail */
-.lib-opt-split { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 14px; align-items: start; }
-.lib-opt-index { display: flex; flex-direction: column; gap: 3px; padding: 8px !important; }
+.lib-opt-split { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 14px; align-items: stretch; }
+.lib-opt-index { position: relative; display: flex; flex-direction: column; gap: 3px; padding: 8px !important; }
+.lib-opt-index::after { content: ""; position: absolute; top: 0; bottom: 0; right: -7px; width: 1px; background: #343b43; pointer-events: none; }
 .lib-opt-index button { display: flex; flex-direction: column; gap: 3px; border: 0; border-radius: 8px; padding: 10px 12px; background: transparent; text-align: left; cursor: pointer; }
 .lib-opt-index button b { color: #e1e6e9; font-size: 14px; }
 .lib-opt-index button small { color: #858f97; font-size: 12px; }
@@ -7242,13 +7243,14 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 .lib-opt-link { justify-self: start; border: 0; padding: 4px 0; background: none; color: #a99bff; font-size: 12px; font-weight: 750; cursor: pointer; }
 .lib-opt-access.is-buttons li { grid-template-columns: 28px minmax(80px, 160px) auto auto; justify-content: start; }
 .lib-opt-access.is-buttons li > .lib-opt-chips { grid-column: 2 / -1; }
-.lib-opt-columns { display: grid; grid-template-columns: minmax(200px, 240px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.lib-opt-columns { display: grid; flex: 1; grid-template-columns: minmax(200px, 240px) minmax(0, 1fr); gap: 24px; align-items: stretch; }
 .lib-opt-columns h3 { margin: 0 0 8px; }
-.lib-opt-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; border-right: 1px solid #252b31; padding-right: 20px; }
+.lib-opt-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; border-right: 1px solid #343b43; padding-right: 20px; }
 .lib-opt-field.is-stacked { flex-direction: column; align-items: stretch; gap: 5px; align-self: stretch; }
 @media (max-width: 760px) {
   .lib-opt-split,.lib-opt-columns { grid-template-columns: minmax(0, 1fr); }
   .lib-opt-index { flex-direction: row; overflow-x: auto; }
+  .lib-opt-index::after { display: none; }
   .lib-opt-index button { flex: none; }
   .lib-opt-stack { border-right: 0; padding-right: 0; }
   .lib-opt-access li,.lib-opt-access.is-buttons li { grid-template-columns: 28px minmax(0, 1fr) auto; }
