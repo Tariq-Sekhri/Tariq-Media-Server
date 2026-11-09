@@ -1,7 +1,19 @@
 import type { FragmentLoaderContext, HlsConfig, Loader, LoaderCallbacks, LoaderConfiguration, LoaderContext } from "hls.js";
 
 export type AudioTrack = { stream_index: number; label: string; language: string; is_default: boolean };
-export type VideoInfo = { source_height: number; levels: number[]; audio_compatible: boolean; audio_codec: string | null; duration?: number; audio_tracks: AudioTrack[] };
+export type VideoInfo = { source_height: number; video_codec?: string | null; video_profile?: string | null; levels: number[]; audio_compatible: boolean; audio_codec: string | null; duration?: number; audio_tracks: AudioTrack[] };
+
+// Audio support alone does not imply that the browser can decode the video.
+export const canDirectPlayVideo = (info: VideoInfo, video: Pick<HTMLMediaElement, "canPlayType"> | null) => {
+  if (!info.video_codec || !video) return true;
+  const codec = info.video_codec.toLowerCase();
+  if (codec === "hevc" || codec === "h265") {
+    const profile = info.video_profile?.toLowerCase().includes("10") ? "2.4" : "1.6";
+    return !!video.canPlayType(`video/mp4; codecs="hvc1.${profile}.L153.B0"`);
+  }
+  const mime = ({ h264: 'video/mp4; codecs="avc1.640028"', vp8: 'video/webm; codecs="vp8"', vp9: 'video/webm; codecs="vp9"', av1: 'video/mp4; codecs="av01.0.08M.08"' } as Record<string, string>)[codec];
+  return mime ? !!video.canPlayType(mime) : false;
+};
 
 export const preferredAudioTrack = (tracks: AudioTrack[], language = "en") => {
   const normalize = (value: string) => ({ eng: "en", english: "en", jpn: "ja", japanese: "ja" }[value.trim().toLowerCase()] ?? value.trim().toLowerCase().split(/[-_]/)[0]);

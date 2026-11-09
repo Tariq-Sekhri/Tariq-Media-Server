@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { load } = require('./load-ts.cjs');
-const { preferredAudioTrack, preloadSegments, cachedFragmentLoader } = load('app/lib/episode-preload.ts', { performance });
+const { preferredAudioTrack, preloadSegments, cachedFragmentLoader, canDirectPlayVideo } = load('app/lib/episode-preload.ts', { performance });
 
 test('English is preferred over Japanese default; language follows reordered episode streams', () => {
   const ja = { stream_index: 1, language: 'jpn', is_default: true };
@@ -39,4 +39,18 @@ test('HLS receives cached bytes without a network request or transferring the re
   loader.load({ url: 'http://localhost/other.ts' }, {}, {});
   loader.load({ url: 'http://localhost/segment.ts', rangeStart: 1 }, {}, {});
   assert.equal(network, 2);
+});
+
+
+test('direct playback checks video codec and HEVC Main 10 independently of AAC audio', () => {
+  const info = { video_codec: 'hevc', video_profile: 'Main 10', audio_compatible: true };
+  let probed;
+  assert.equal(canDirectPlayVideo(info, { canPlayType: mime => { probed = mime; return ''; } }), false);
+  assert.equal(probed, 'video/mp4; codecs="hvc1.2.4.L153.B0"');
+  assert.equal(canDirectPlayVideo(info, { canPlayType: () => 'probably' }), true);
+  assert.equal(canDirectPlayVideo({ ...info, video_profile: 'Main' }, { canPlayType: mime => { probed = mime; return 'probably'; } }), true);
+  assert.equal(probed, 'video/mp4; codecs="hvc1.1.6.L153.B0"');
+  assert.equal(canDirectPlayVideo({ video_codec: 'h264' }, { canPlayType: () => 'probably' }), true);
+  assert.equal(canDirectPlayVideo({ video_codec: 'mpeg2video' }, { canPlayType: () => 'probably' }), false);
+  assert.equal(canDirectPlayVideo({}, { canPlayType: () => '' }), true);
 });

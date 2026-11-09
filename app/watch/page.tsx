@@ -5,7 +5,7 @@ import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useSta
 import { createPortal } from "react-dom";
 import { playsAlongside } from "../lib/library-playback";
 import Hls from "hls.js";
-import { cachedFragmentLoader, preferredAudioTrack, preloadSegments, type VideoInfo } from "../lib/episode-preload";
+import { cachedFragmentLoader, canDirectPlayVideo, preferredAudioTrack, preloadSegments, type VideoInfo } from "../lib/episode-preload";
 import { canBufferQueueVideo, nearbyQueueItems, QUEUE_PRELOAD_BYTES } from "../lib/queue-preload";
 import { authFetch, getSessionUser, reportClientError, reportClientPerformance } from "../lib/auth";
 import { API_BASE, apiEntryToMediaItem, episodeNumbers, isMovieWatch, isShowWatch, readStoredVolumePosition, resolveEpisodeMetadata, applyMediaVolume, readMediaVolumePosition, resumeMediaVolume, releaseMediaVolume, stableId, supportedFormats, type ApiLibraryEntry, type MediaItem } from "../lib/media";
@@ -783,7 +783,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
   const shouldPlayRef = useRef(false);
   const qualityRequestRef = useRef(0);
   const activeTranscodeSessionRef = useRef<string | null>(null);
-  const directAudioCompatibleRef = useRef(true);
+  const directPlaybackCompatibleRef = useRef(true);
   const audioLanguageRef = useRef("en");
   const videoInfoCacheRef = useRef(new Map<string, VideoInfo>());
   const nextUserStateRef = useRef<{ path: string; userId: number | undefined; state: UserState } | null>(null);
@@ -1278,7 +1278,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
 
   useEffect(() => {
     if (!details || quality !== "original" || !savedPlaybackLoaded || !metadataLoaded || !audioCompatibilityChecked || !audioTracksLoaded) return;
-    if (!directAudioCompatibleRef.current) return;
+    if (!directPlaybackCompatibleRef.current) return;
     // Multi-audio files must start through HLS so the preferred English track
     // can be mapped and the adjacent Audio picker can switch tracks later.
     // Do not let the direct-play resume path claim startup first.
@@ -2000,7 +2000,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     || !metadataLoaded
     || !audioCompatibilityChecked
     || initialResumeAppliedRef.current !== details?.src
-    || (!directAudioCompatibleRef.current && quality === "original");
+    || (!directPlaybackCompatibleRef.current && quality === "original");
 
   const resumePlayback = () => {
     if (details?.kind === "image") {
@@ -2216,7 +2216,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     const requestedQuality = nextQuality === "original-aac" ? "original" : nextQuality;
     const selectedAudio = audioStreamOverride === undefined ? selectedAudioStream : audioStreamOverride;
     const selectedSubtitleStream = subtitleStreamOverride === undefined ? burnedSubtitleStream : subtitleStreamOverride;
-    const originalWithAac = requestedQuality === "original" && (selectedSubtitleStream !== null || !directAudioCompatibleRef.current || audioTracks.length > 1);
+    const originalWithAac = requestedQuality === "original" && (selectedSubtitleStream !== null || !directPlaybackCompatibleRef.current || audioTracks.length > 1);
     const selectedQuality = originalWithAac ? "original-aac" : requestedQuality;
     const streamQuality = originalWithAac ? String(sourceHeightRef.current || sourceHeight || qualityLevels[0] || 720) : requestedQuality;
     if (!video || !details || (!force && (qualityBusyRef.current || selectedQuality === quality))) { setQualityMenuOpen(false); return; }
@@ -2341,7 +2341,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
           hls.destroy();
           hlsRef.current = null;
           streamOffsetRef.current = 0;
-          if (!directAudioCompatibleRef.current || audioTracks.length > 1 || selectedSubtitleStream !== null) {
+          if (!directPlaybackCompatibleRef.current || audioTracks.length > 1 || selectedSubtitleStream !== null) {
             qualityBusyRef.current = false;
             setQualityBusy(false);
             setPlaybackError(`${selectedQuality === "auto" ? "Automatic quality" : selectedQuality === "original-aac" ? "Original resolution" : `${streamQuality}p`} failed. Try another quality.`);
@@ -2379,7 +2379,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
       }
       cancelTranscodeSession(session);
       if (requestId !== qualityRequestRef.current) return;
-      if (!directAudioCompatibleRef.current || audioTracks.length > 1 || selectedSubtitleStream !== null) {
+      if (!directPlaybackCompatibleRef.current || audioTracks.length > 1 || selectedSubtitleStream !== null) {
         streamOffsetRef.current = 0;
         qualityBusyRef.current = false;
         setQualityBusy(false);
@@ -2548,7 +2548,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     setAudioTracks([]);
     setSelectedAudioStream(null);
     if (details.offline) {
-      directAudioCompatibleRef.current = true;
+      directPlaybackCompatibleRef.current = true;
       setAudioCompatibilityChecked(true);
       setAudioTracksLoaded(true);
       return;
@@ -2562,13 +2562,13 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         sourceHeightRef.current = info.source_height;
         setSourceHeight(info.source_height);
         setQualityLevels(info.levels.filter((height) => height !== info.source_height));
-        directAudioCompatibleRef.current = info.audio_compatible;
+        directPlaybackCompatibleRef.current = info.audio_compatible && canDirectPlayVideo(info, videoRef.current);
         const availableAudioTracks = info.audio_tracks ?? [];
         setAudioTracks(availableAudioTracks);
         setSelectedAudioStream(preferredAudioTrack(availableAudioTracks, audioLanguageRef.current)?.stream_index ?? null);
         // ffprobe already supplied HLS metadata; do not wait for the browser to
         // parse the temporary, often unsupported original HEVC/10-bit source.
-        if (!info.audio_compatible || availableAudioTracks.length > 1) setMetadataLoaded(true);
+        if (!directPlaybackCompatibleRef.current || availableAudioTracks.length > 1) setMetadataLoaded(true);
         setAudioTracksLoaded(true);
         if (Number.isFinite(info.duration) && info.duration! > 0) {
           sourceDurationRef.current = info.duration!;
@@ -2581,7 +2581,9 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
             media_name: details.name,
             audio_codec: info.audio_codec,
             audio_compatible: info.audio_compatible,
-            mode: info.audio_compatible ? "direct" : "transcode",
+            video_codec: info.video_codec,
+            video_profile: info.video_profile,
+            mode: directPlaybackCompatibleRef.current ? "direct" : "transcode",
           });
         }
         if (!info.audio_compatible) {
@@ -2601,7 +2603,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
 
   useEffect(() => {
     if (!details || details.kind === "image" || !savedPlaybackLoaded || !metadataLoaded || !audioCompatibilityChecked || !audioTracksLoaded) return;
-    if ((directAudioCompatibleRef.current && audioTracks.length <= 1) || quality !== "original" || qualityBusyRef.current) return;
+    if ((directPlaybackCompatibleRef.current && audioTracks.length <= 1) || quality !== "original" || qualityBusyRef.current) return;
     if (initialResumeAppliedRef.current === details.src) return;
 
     // Starting the AAC/HLS fallback before user-state finishes loading races
@@ -2677,7 +2679,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         }
         // Queue navigation starts the new file at its original resolution.
         const streamQuality = String(info.source_height);
-        if (quality === "original" && info.audio_compatible && info.audio_tracks.length <= 1 && subtitle === null) {
+        if (quality === "original" && info.audio_compatible && canDirectPlayVideo(info, videoRef.current) && info.audio_tracks.length <= 1 && subtitle === null) {
           if (canBufferQueueVideo(nextQueueItem)) setPreparedVideo({ slot: 1 - activeVideoSlot, src: nextQueueItem.src! });
           return;
         }

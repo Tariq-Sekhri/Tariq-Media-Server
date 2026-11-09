@@ -1484,6 +1484,8 @@ struct CancelTranscodeQuery {
 #[derive(Serialize, Clone)]
 struct QualityResponse {
     source_height: u32,
+    video_codec: Option<String>,
+    video_profile: Option<String>,
     levels: Vec<u32>,
     audio_codec: Option<String>,
     audio_compatible: bool,
@@ -14123,7 +14125,7 @@ async fn qualities(
 
     // Read video, audio languages and duration in one file probe.
     let output = hidden_async_command(&state.ffprobe_path)
-        .args(["-v", "error", "-show_entries", "stream=index,codec_type,codec_name,height:stream_tags=language,title:stream_disposition=default:format=duration", "-of", "json"])
+        .args(["-v", "error", "-show_entries", "stream=index,codec_type,codec_name,profile,height:stream_tags=language,title:stream_disposition=default:format=duration", "-of", "json"])
         .arg(&input).output().await.map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     if !output.status.success() { return Err(StatusCode::UNPROCESSABLE_ENTITY); }
     let probe: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
@@ -14170,8 +14172,11 @@ async fn qualities(
     if !levels.contains(&source_height) {
         levels.insert(0, source_height);
     }
+    let video_stream = streams.iter().find(|stream| stream["codec_type"] == "video");
     let response = QualityResponse {
         source_height,
+        video_codec: video_stream.and_then(|stream| stream["codec_name"].as_str()).map(str::to_owned),
+        video_profile: video_stream.and_then(|stream| stream["profile"].as_str()).map(str::to_owned),
         levels,
         audio_codec: audio_codec.clone(),
         audio_compatible,
