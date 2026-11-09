@@ -1536,10 +1536,8 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
               <p>LIVE QUEUE</p>
               <h2>{processes.filter((process) => isActiveWork(process.status)).length} active · {processes.filter((process) => !isActiveWork(process.status) && !isFinishedWork(process.status)).length} waiting / inactive · {processes.filter((process) => needsWorkAttention(process.status)).length} need attention</h2>
             </div>
-            <button type="button" className="admin-finished-work-toggle" role="switch" aria-label="Show finished work" aria-checked={showFinishedWork} onClick={() => setShowFinishedWork((shown) => !shown)}>
+            <button type="button" className="admin-finished-work-toggle" aria-pressed={showFinishedWork} onClick={() => setShowFinishedWork((shown) => !shown)}>
               <span>Finished work ({processes.filter((process) => isFinishedWork(process.status)).length})</span>
-              <span className="admin-finished-work-state" aria-hidden="true">{showFinishedWork ? "On" : "Off"}</span>
-              <span className="admin-finished-work-track" aria-hidden="true" />
             </button>
           </header>
           {(processRefreshError || (processUpdatedAt !== null && processClock - processUpdatedAt > 15_000)) && <div className="admin-work-feedback" aria-live="polite">
