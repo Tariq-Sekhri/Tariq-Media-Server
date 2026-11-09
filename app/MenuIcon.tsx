@@ -36,6 +36,7 @@ const paths = {
   plus: "M12 5v14M5 12h14",
   star: "M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z",
   folder: "M3 6h6l2 2h10v11H3z",
+  folderUp: "M3 6h6l2 2h10v12H3zM12 17v-6M9 14l3-3 3 3",
   upload: "M12 20V9M7 14l5-5 5 5M5 4h14",
   list: "M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01",
   shuffle: "M4 7h3l10 10h3M4 17h3l10-10h3M17 4l3 3-3 3M17 14l3 3-3 3",

@@ -5499,6 +5499,7 @@
 .admin-location-path-row label,.admin-location-form-grid label { display: grid; min-width: 0; gap: 7px; color: #a9b0b6; font-size: 9px; font-weight: 800; }
 .admin-location-path-row input { width: 100%; min-width: 0; }
 .admin-location-path-row > button,.admin-folder-browser header button { border: 1px solid #394149; border-radius: 8px; padding: 10px 11px; background: #191e24; color: #c7cdd2; font-size: 9px; font-weight: 850; cursor: pointer; }.admin-location-path-row > button:disabled,.admin-folder-browser header button:disabled { cursor: not-allowed; opacity: .45; }
+.admin-folder-browser header button .menu-icon { margin-right: 5px; }
 .admin-folder-browser { overflow: hidden; margin-top: 12px; border: 1px solid #303740; border-radius: 10px; background: #0a0d10; }
 .admin-folder-browser > header { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 9px; border-bottom: 1px solid #272d33; background: #101419; }
 .admin-folder-browser header code { overflow: hidden; color: #8c969e; font: 9px ui-monospace,Consolas,monospace; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
