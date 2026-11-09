@@ -13,6 +13,7 @@ import { API_BASE, ancestorTags, inheritedTags, resolveEpisodeMetadata, apiEntry
 import { completeSearchToken, fuzzyMatches, matchesSearchQuery, parseSearchQuery, searchCompletionContext, searchFields } from "./lib/search";
 import { buildSearchSuggestions, canSuggestLibraryPath, searchSuggestionItemPath, type SearchSuggestion, type SuggestionKind } from "./lib/search-suggestions";
 import { offlineFolderCovers } from "./lib/offline-covers";
+import { catalogTitleQueries, resolveCatalogTitle } from "./lib/catalog-title";
 import { browseTagFilters } from "./lib/browse-tag-filters";
 import { queueSourceForItem, startPagedShuffle, startPlaybackQueue, writeQueueSource, type QueueSource } from "./lib/playback-queue";
 import { authFetch, canAccessAdminPanel, clearSession, getSessionToken, getSessionUser, hasAdminPermission, isAbortError, logOut, reportClientError, reportClientPerformance } from "./lib/auth";
@@ -166,7 +167,7 @@ const LIBRARY_CACHE_DB_VERSION = 2;
 const LEGACY_LIBRARY_CACHE_KEY = "framebox:library-cache:v6";
 // Keep in-memory Fast Refresh state from pinning metadata selected by an older
 // matching policy. Bump alongside a meaningful matcher change.
-const TITLE_METADATA_MATCH_VERSION = 8;
+const TITLE_METADATA_MATCH_VERSION = 9;
 const NEW_ITEMS_WINDOW_SECONDS = 24 * 60 * 60;
 const titleMetadataKey = (path: string, kind: string) => `${path}::${kind}::v${TITLE_METADATA_MATCH_VERSION}`;
 const PLAYBACK_QUEUE_KEY = "tms:playback-queue:v1";
@@ -3303,32 +3304,17 @@ export default function Home() {
       if (needsTrailerRefresh) trailerMetadataRefresh.current.add(metadataKey);
       metadataLoading.current.add(metadataKey);
       setPendingTitleMetadata(new Set(metadataLoading.current));
-      // Torrent sites prefix folders with their domain ("www.UIndex.org - The Odyssey").
-      const title = rawTitle.replace(/^(?:\s*\[[^\]]+\]\s*)+/, "").replace(/^\s*www\.[\w-]+(?:\.[\w-]+)+\s*[-–—|]+\s*/i, "").replace(/\b(?:19|20)\d{2}\b.*$/i, "").replace(/\b(?:1080p|720p|2160p|bluray|web-?dl).*$/i, "").trim();
-      const params = new URLSearchParams({ title, kind: evidence.kind, seasons: String(evidence.seasons), episodes: String(evidence.episodes), videos: String(evidence.videos) });
+      const queries = catalogTitleQueries(rawTitle);
+      const params = new URLSearchParams({ seasons: String(evidence.seasons), episodes: String(evidence.episodes), videos: String(evidence.videos) });
       if (evidence.year) params.set("year", evidence.year);
       const tmdbId = path.match(/\[tmdbid-(\d+)\]/i)?.[1];
       if (tmdbId) params.set("tmdb_id", tmdbId);
-      const normalizeTitle = (name: string) => name.toLowerCase().replace(/&/g, " and ").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-      const requested = normalizeTitle(title);
-      const isMatchingTitle = (metadata: TitleMetadata) => {
-        const candidate = normalizeTitle(metadata.name);
-        return Boolean(requested && candidate && (requested === candidate || requested.startsWith(`${candidate} `) || candidate.startsWith(`${requested} `)));
-      };
-      void fetch(`${API_BASE}/api/title-metadata?${params}`)
-        .then(async (response) => {
-          let metadata = response.ok ? await response.json() as TitleMetadata : undefined;
-          // Empty title folders have no episode evidence yet. Try the show
-          // catalog when movie matching finds no relevant title. Validate the
-          // response too, so an older server cannot repopulate a bad cache.
-          if ((response.status === 404 || (metadata && !isMatchingTitle(metadata))) && evidence.kind === "movie" && evidence.videos === 0) {
-            params.set("kind", "series");
-            const seriesResponse = await fetch(`${API_BASE}/api/title-metadata?${params}`);
-            metadata = seriesResponse.ok ? await seriesResponse.json() as TitleMetadata : undefined;
-          }
-          if (!metadata || !isMatchingTitle(metadata)) throw new Error("No matching catalog title");
-          return metadata;
-        })
+      void resolveCatalogTitle<TitleMetadata>(queries, evidence.kind, async (title, kind) => {
+        params.set("title", title);
+        params.set("kind", kind);
+        const response = await fetch(`${API_BASE}/api/title-metadata?${params}`, { signal: AbortSignal.timeout(15_000) });
+        return { status: response.status, metadata: response.ok ? await response.json() as TitleMetadata : undefined };
+      }, evidence.kind === "movie" && evidence.videos === 0)
         .then((metadata) => {
           const matches = { [metadataKey]: metadata, [titleMetadataKey(path, metadata.type)]: metadata };
           setTitleMetadata((current) => ({ ...current, ...matches }));
