@@ -12856,7 +12856,7 @@ fn schedule_trickplay_library(
         // Recognising finished previews must not wait for the idle window, or a
         // library that has nothing left to do would sit at 0% for as long as
         // somebody is using the computer.
-        let (videos, mut completed_videos, total_videos) =
+        let (videos, mut completed_videos, mut total_videos) =
             trickplay_inventory(&state, &library).await;
         {
             let mut active = state.active_trickplay_libraries.lock().await;
@@ -12941,11 +12941,13 @@ fn schedule_trickplay_library(
                     completed_videos += 1;
                 }
                 TrickplayVideoResult::AlreadyGenerated => completed_videos += 1,
+                TrickplayVideoResult::Skipped => total_videos = total_videos.saturating_sub(1),
                 TrickplayVideoResult::Failed => failed_videos += 1,
             }
             let mut active = state.active_trickplay_libraries.lock().await;
             if let Some(trickplay) = active.get_mut(&library) {
                 trickplay.completed_videos = completed_videos;
+                trickplay.total_videos = total_videos;
             }
         }
         tracing::info!(library = %library, videos = total_videos, generated = generated_videos, failed = failed_videos, stopped_early, "Finished background trickplay generation");
@@ -13700,6 +13702,11 @@ async fn trickplay_inventory(state: &AppState, library: &str) -> (Vec<PathBuf>, 
             .filter_map(Result::ok)
             .map(|entry| entry.into_path())
             .filter(|path| path.is_file() && is_video_file(path))
+            .filter(|path| {
+                let (Ok(relative), Ok(metadata)) = (path.strip_prefix(&library_root), path.metadata()) else { return true };
+                let key = trickplay_key(&relative.to_string_lossy().replace('\\', "/"), &metadata);
+                !trickplay_dir.join(key).join("no-video").is_file()
+            })
             .collect::<Vec<_>>();
         let total = videos.len();
         let (complete, pending): (Vec<_>, Vec<_>) = videos.into_iter().partition(|path| {
@@ -14136,7 +14143,27 @@ fn trickplay_is_complete(output_dir: &Path, duration: Option<f64>) -> bool {
 enum TrickplayVideoResult {
     AlreadyGenerated,
     Generated,
+    Skipped,
     Failed,
+}
+
+fn preview_color_repair(codec: &str, color_space: &str) -> Option<&'static str> {
+    if color_space != "reserved" { return None; }
+    match codec {
+        "h264" => Some("h264_metadata=matrix_coefficients=1"),
+        "hevc" => Some("hevc_metadata=matrix_coefficients=1"),
+        "av1" => Some("av1_metadata=matrix_coefficients=1"),
+        _ => None,
+    }
+}
+
+fn timeline_preview_filter(duration: f64) -> String {
+    let sampling = if duration < TRICKPLAY_INTERVAL_SECONDS {
+        "select=eq(n\\,0)".to_owned()
+    } else {
+        format!("fps=1/{TRICKPLAY_INTERVAL_SECONDS}")
+    };
+    format!("{sampling},scale=960:-2:force_original_aspect_ratio=decrease")
 }
 
 async fn preview_stderr_tail(mut stderr: impl tokio::io::AsyncRead + Unpin) -> String {
@@ -14183,6 +14210,9 @@ async fn generate_trickplay_video(
     };
     let key = trickplay_key(&video_path, &metadata);
     let output_dir = state.trickplay_dir.join(key);
+    if output_dir.join("no-video").is_file() {
+        return TrickplayVideoResult::Skipped;
+    }
     if trickplay_marker_is_valid(&output_dir) {
         return TrickplayVideoResult::AlreadyGenerated;
     }
@@ -14190,19 +14220,35 @@ async fn generate_trickplay_video(
         .args([
             "-v",
             "error",
+            "-select_streams",
+            "V:0",
             "-show_entries",
-            "format=duration",
+            "stream=codec_name,color_space:format=duration",
             "-of",
-            "default=noprint_wrappers=1:nokey=1",
+            "json",
         ])
         .arg(input)
         .output()
         .await;
-    let duration = probe
+    let probe_json = probe
         .as_ref().ok()
         .filter(|result| result.status.success())
-        .and_then(|result| std::str::from_utf8(&result.stdout).ok())
-        .and_then(|text| text.trim().parse::<f64>().ok())
+        .and_then(|result| serde_json::from_slice::<Value>(&result.stdout).ok());
+    if probe_json.as_ref().and_then(|probe| probe["streams"].as_array()).is_some_and(Vec::is_empty) {
+        if let Err(error) = tokio::fs::create_dir_all(&output_dir).await {
+            tracing::warn!(library, video_path, %error, "Could not record audio-only preview exclusion");
+            return TrickplayVideoResult::Failed;
+        }
+        if let Err(error) = tokio::fs::write(output_dir.join("no-video"), b"no video stream").await {
+            tracing::warn!(library, video_path, %error, "Could not record audio-only preview exclusion");
+            return TrickplayVideoResult::Failed;
+        }
+        tracing::info!(library, video_path, "Skipped timeline previews for media without a video stream");
+        return TrickplayVideoResult::Skipped;
+    }
+    let duration = probe_json.as_ref()
+        .and_then(|probe| probe["format"]["duration"].as_str())
+        .and_then(|text| text.parse::<f64>().ok())
         .filter(|value| value.is_finite() && *value > 0.0);
     let Some(duration) = duration else {
         match probe {
@@ -14220,6 +14266,8 @@ async fn generate_trickplay_video(
     }
     let pattern = output_dir.join("%08d.jpg");
     let max_speed = trickplay_max_speed(state, library).await;
+    let video = probe_json.as_ref().and_then(|probe| probe["streams"].as_array()).and_then(|streams| streams.first());
+    let color_repair = video.and_then(|video| preview_color_repair(video["codec_name"].as_str().unwrap_or(""), video["color_space"].as_str().unwrap_or("")));
     let mut command = hidden_async_command(&state.ffmpeg_path);
     command
         .args([
@@ -14230,10 +14278,13 @@ async fn generate_trickplay_video(
             if max_speed { "0" } else { "1" },
             "-filter_threads",
             if max_speed { "0" } else { "1" },
-            "-i",
-        ])
-        .arg(input)
-        .args(["-vf", &format!("fps=1/{TRICKPLAY_INTERVAL_SECONDS},scale=960:-2:force_original_aspect_ratio=decrease"), "-q:v", "5", "-start_number", "0"])
+        ]);
+    if let Some(repair) = color_repair {
+        command.args(["-bsf:v", repair]);
+        tracing::info!(library, video_path, repair, "Correcting reserved color metadata for preview decoding");
+    }
+    command.arg("-i").arg(input)
+        .args(["-map", "0:V:0", "-an", "-vf", &timeline_preview_filter(duration), "-q:v", "5", "-start_number", "0"])
         .arg(pattern)
         .stderr(Stdio::piped());
     #[cfg(windows)]
@@ -19569,6 +19620,33 @@ mod tests {
         assert_eq!(tail.len(), 8192);
         assert!(tail.ends_with("final FFmpeg failure"));
         assert_eq!(preview_stderr_tail(&b""[..]).await, "");
+    }
+
+    #[test]
+    fn timeline_preview_color_repair_preserves_valid_metadata() {
+        assert_eq!(preview_color_repair("h264", "bt709"), None);
+        assert_eq!(preview_color_repair("hevc", "bt2020nc"), None);
+        assert_eq!(preview_color_repair("h264", "reserved"), Some("h264_metadata=matrix_coefficients=1"));
+        assert_eq!(preview_color_repair("hevc", "reserved"), Some("hevc_metadata=matrix_coefficients=1"));
+        assert_eq!(preview_color_repair("av1", "reserved"), Some("av1_metadata=matrix_coefficients=1"));
+    }
+
+    #[test]
+    fn timeline_preview_short_clip_produces_a_real_frame() {
+        let ffmpeg = env::var_os("TMS_FFMPEG").map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Program Files\Jellyfin\Server\ffmpeg.exe"));
+        if !ffmpeg.is_file() { return; }
+        let root = env::temp_dir().join(format!("tms-preview-short-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let frame = root.join("00000000.jpg");
+        let output = hidden_sync_command(&ffmpeg)
+            .args(["-v", "error", "-threads", "1", "-filter_threads", "1", "-f", "lavfi", "-i", "color=c=black:s=32x32:d=1", "-vf", &timeline_preview_filter(1.0), "-q:v", "5"])
+            .arg(&frame).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let image = image::open(frame).unwrap();
+        assert_eq!(image.width(), 960);
+        assert!(image.height() > 0);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(windows)]
