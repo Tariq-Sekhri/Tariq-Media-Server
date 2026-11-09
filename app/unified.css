@@ -7320,3 +7320,6 @@ thead .lib-tabs-person { background: #12171b; }
 .admin-workspace .admin-library-list > .admin-surface { border-bottom: 1px solid #1d2227; }
 .admin-workspace .admin-library-list > .admin-surface:last-of-type { border-bottom: 0; }
 .admin-workspace .admin-location-note { border: 0; border-radius: 0; background: transparent; }
+.admin-user-table-head,.admin-user-row { grid-template-columns: minmax(175px, 1fr) 105px 105px 95px 110px auto; }
+.admin-user-row .admin-row-actions { flex-wrap: nowrap; }
+@media (max-width: 760px) { .admin-user-row .admin-row-actions { flex-wrap: wrap; } }
