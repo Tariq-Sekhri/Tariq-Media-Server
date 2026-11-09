@@ -1466,10 +1466,8 @@ export default function Home() {
   const paginationKeyInitializedRef = useRef(false);
   const [libraries, setLibraries] = useState<Record<string, LibraryConfig>>(() => initialSnapshot?.libraries ?? {});
   const [folderCovers, setFolderCovers] = useState<Record<string, string>>(() => initialSnapshot?.folderCovers ?? {});
-  const [coverFolder, setCoverFolder] = useState<MediaItem | null>(null);
   const [titleMetadata, setTitleMetadata] = useState<Record<string, TitleMetadata>>(() => initialSnapshot?.titleMetadata ?? {});
   const [trailer, setTrailer] = useState<{ title: string; youtubeId: string } | null>(null);
-  const coverInput = useRef<HTMLInputElement>(null);
   const uploadInput = useRef<HTMLInputElement>(null);
   const uploadFolderInput = useRef<HTMLInputElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
@@ -4617,49 +4615,6 @@ export default function Home() {
     const candidates = items.filter((item) => (item.kind === "image" || item.kind === "video") && item.src && (item.parent === path || item.parent?.startsWith(`${path}/`)));
     return candidates.length ? candidates[stableId(`cover:${path}`) % candidates.length] : null;
   };
-  const chooseFolderCover = (folder: MediaItem) => {
-    setCoverFolder(folder);
-    setContextItem(null);
-    coverInput.current?.click();
-  };
-  const uploadFolderCover = async (file: File | undefined) => {
-    if (!file || !coverFolder) return;
-    const path = folderPath(coverFolder);
-    try {
-      const response = await authFetch(`${API_BASE}/api/folder-covers`, { method: "PUT", headers: { "Content-Type": file.type, "X-Folder-Path": path }, body: file });
-      if (!response.ok) throw new Error(`Server returned ${response.status}`);
-      const coversResponse = await authFetch(`${API_BASE}/api/folder-covers?t=${Date.now()}`);
-      if (!coversResponse.ok) throw new Error("Could not reload folder covers");
-      const nextFolderCovers = await coversResponse.json() as Record<string, string>;
-      setFolderCovers(nextFolderCovers);
-      updateLibraryCache((current) => ({ ...current, folderCovers: nextFolderCovers }));
-      flash(`Cover updated for ${coverFolder.name}`);
-    } catch (error) {
-      flash(error instanceof Error ? `Could not save cover: ${error.message}` : "Could not save cover");
-    } finally {
-      setCoverFolder(null);
-      if (coverInput.current) coverInput.current.value = "";
-    }
-  };
-  const changeFolderCover = async (folder: MediaItem) => {
-    const path = folderPath(folder);
-    setContextItem(null);
-    try {
-      const response = await authFetch(`${API_BASE}/api/folder-covers/automatic`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folder_path: path, refresh: true }),
-      });
-      if (!response.ok) throw new Error(`Server returned ${response.status}`);
-      const result = await response.json() as { filename?: string };
-      if (!result.filename) throw new Error("TMS could not create a new cover");
-      setFolderCovers((current) => ({ ...current, [path]: result.filename! }));
-      updateLibraryCache((current) => ({ ...current, folderCovers: { ...current.folderCovers, [path]: result.filename! } }));
-      flash(`Generated a new cover for ${folder.name}`);
-    } catch (error) {
-      flash(error instanceof Error ? `Could not change cover: ${error.message}` : "Could not change cover");
-    }
-  };
   const refreshLibraryEntries = async (targetFolder = currentFolder) => {
     const response = await authFetch(libraryApiUrl(sort, sortDirection, targetFolder));
     if (!response.ok) throw new Error(`Server returned ${response.status}`);
@@ -5806,30 +5761,13 @@ export default function Home() {
     const itemPath = mediaPath(item) ?? "";
     const isDownloaded = Boolean(item.offline) || section === "offline";
     const isLibrary = item.kind === "folder" && !item.parent && !isDownloaded;
-    const catalogTitle = catalogTitleForItem(item);
-    const isTitle = Boolean(catalogTitle);
-    const titleCardPath = catalogTitle?.path ?? itemPath;
-    const evidence = catalogTitle?.evidence ?? null;
     const episodeId = item.kind === "video" ? episodeNumbers(`${item.parent ?? ""}/${item.name}`) : null;
     const seriesPath = titlePathForVideo(item);
     const episodeInfo = episodeId && seriesPath ? resolveEpisodeMetadata(titleMetadata[titleMetadataKey(seriesPath, "series")]?.videos, episodeId.season, episodeId.episode) : undefined;
     const menuTitle = episodeInfo && episodeId ? `Episode ${episodeId.episode} · ${episodeInfo.name ?? episodeInfo.title}` : item.name.replace(/\.[a-z0-9]+$/i, "");
-    const titleKindLabel =
-      isTitle && evidence
-        ? evidence.kind === "movie"
-          ? "Movie"
-          : "Show"
-        : null;
     const offlineBundle = item.offline
       ? offlineBundles.find((bundle) => bundle.id === item.offline!.bundleId)
       : undefined;
-    const openContextItem = () => {
-      if (isTitle && evidence?.kind === "series" && !item.trashed) openFolder(item);
-      else if (isTitle && evidence && item.kind === "folder" && !item.trashed) playCatalogTitle(titleCardPath, evidence.kind);
-      else if (item.kind === "folder") openFolder(item);
-      else openItem(item);
-      setContextItem(null);
-    };
     return (
       <div
         ref={itemMenuRef}
@@ -5853,12 +5791,6 @@ export default function Home() {
         }}
       >
         <div className="card-menu-title">{menuTitle}</div>
-        {isTitle && evidence && <button onClick={() => { playCatalogTitle(titleCardPath, evidence.kind); setContextItem(null); }}><MenuIcon name="play" />Play title</button>}
-        {isTitle && evidence && trailerYoutubeId(titleMetadata[titleMetadataKey(titleCardPath, evidence.kind)]) && <button onClick={() => { setTrailer({ title: catalogTitle?.title ?? item.name, youtubeId: trailerYoutubeId(titleMetadata[titleMetadataKey(titleCardPath, evidence.kind)])! }); setContextItem(null); }}><MenuIcon name="play" />Trailer</button>}
-        {!isLibrary && !item.trashed && <button onClick={() => { void toggleFavorite(item); setContextItem(null); }}><MenuIcon name="star" />{item.favorite ? "Remove from favorites" : "Add to favorites"}</button>}
-        <button onClick={openContextItem} disabled={Boolean(item.offline?.status && item.offline.status !== "ready")}>
-          {titleKindLabel || item.kind === "video" || item.kind === "audio" ? <><MenuIcon name="play" />Play</> : <><MenuIcon name="open" />Open</>}
-        </button>
         {!item.trashed && mediaPath(item) && (
           <button
             disabled={isDownloaded || offlineBusy}
@@ -5976,7 +5908,7 @@ export default function Home() {
                 setContextItem(null);
               }}
             >
-              <MenuIcon name="trash" />Delete folder
+              <MenuIcon name="trash" />Delete
             </button>
           )}
         {!item.trashed && !isDownloaded && !isLibrary && !canDeleteItem(item) && itemPath && !sessionUser?.is_admin && !(item.kind === "folder" && libraries[itemPath.split("/")[0]]?.folder_structure_static) && (
@@ -5995,68 +5927,6 @@ export default function Home() {
             <MenuIcon name="trash" />Delete permanently
           </button>
         )}
-        {item.kind === "folder" &&
-          (canCreateFolderAtPath(itemPath) || isDownloaded) && (
-            <button
-              disabled={isDownloaded || !canCreateFolderAtPath(itemPath)}
-              onClick={() => {
-                startFolderCreation(itemPath);
-                setContextItem(null);
-              }}
-            >
-              <MenuIcon name="plus" />New folder
-            </button>
-          )}
-        {item.kind === "folder" &&
-          (canUploadToPath(itemPath) || isDownloaded) && (
-            <button
-              disabled={isDownloaded || !canUploadToPath(itemPath)}
-              onClick={() => {
-                startUpload(itemPath);
-                setContextItem(null);
-              }}
-            >
-              <MenuIcon name="upload" />Upload media
-            </button>
-          )}
-        {item.kind === "folder" &&
-          (canDownloadToPath(itemPath) || isDownloaded) && (
-            <button
-              disabled={isDownloaded || !canDownloadToPath(itemPath)}
-              onClick={() => {
-                startServerDownload(itemPath);
-                setContextItem(null);
-              }}
-            >
-              <MenuIcon name="download" />Download from URL
-            </button>
-          )}
-        {item.kind === "folder" &&
-          canManageLibraries &&
-          !item.trashed &&
-          !isDownloaded && (
-            <button
-              onClick={() => {
-                chooseFolderCover(item);
-                setContextItem(null);
-              }}
-            >
-              ▧ Upload cover
-            </button>
-          )}
-        {item.kind === "folder" &&
-          canManageLibraries &&
-          !item.trashed &&
-          !isDownloaded && (
-            <button
-              onClick={() => {
-                void changeFolderCover(item);
-                setContextItem(null);
-              }}
-            >
-              ↻ Change cover
-            </button>
-          )}
         {isLibrary &&
           canManageLibraries &&
           !item.trashed && (
@@ -6337,13 +6207,6 @@ export default function Home() {
         setContextItem(null);
       }}
     >
-      <input
-        className="folder-cover-input"
-        ref={coverInput}
-        type="file"
-        accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
-        onChange={(event) => void uploadFolderCover(event.target.files?.[0])}
-      />
       <input
         className="upload-file-input"
         ref={uploadInput}
