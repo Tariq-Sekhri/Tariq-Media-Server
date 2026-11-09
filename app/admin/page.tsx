@@ -8,6 +8,7 @@ import type { YtDlpJob } from "../ServerDownloadDialog";
 import { isActiveWork, isFinishedWork, needsWorkAttention, workTitle } from "../lib/running-work";
 import MenuIcon from "../MenuIcon";
 import AdminTrash from "./Trash";
+import LibrariesOptions, { LibrariesLayoutPicker, useLibrariesLayout } from "./LibrariesOptions";
 import MobileNavigation from "../MobileNavigation";
 import { mainNavigation } from "../lib/navigation";
 import { RequestsPanel } from "../discover/Requests";
@@ -333,6 +334,7 @@ export default function AdminDashboard() {
   const [savingLibrary, setSavingLibrary] = useState("");
   const [savedLibrary, setSavedLibrary] = useState("");
   const [trickplayAction, setTrickplayAction] = useState("");
+  const [librariesLayout, setLibrariesLayout] = useLibrariesLayout();
   const [showCreateLibrary, setShowCreateLibrary] = useState(false);
   const [libraryName, setLibraryName] = useState("");
   const [libraryContentType, setLibraryContentType] = useState<LibraryContentType>("mixed");
@@ -1234,6 +1236,7 @@ export default function AdminDashboard() {
           <div>{copy.eyebrow && <p>{copy.eyebrow}</p>}<h1>{copy.title}</h1>{copy.description && <span>{copy.description}</span>}</div>
           <div className="admin-page-header-actions">
             {section === "locations" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={openAddLocation}>Add folder</button>}
+            {section === "libraries" && <LibrariesLayoutPicker layout={librariesLayout} onChange={setLibrariesLayout} />}
             {section === "libraries" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={() => setShowCreateLibrary(true)}>Create library</button>}
             {section !== "processes" && section !== "trash" && <button type="button" aria-label={loading ? "Refreshing" : "Refresh"} onClick={() => void refresh()} disabled={loading || clearingMetrics}><MenuIcon name="restore" />{loading ? "Refreshing" : "Refresh"}</button>}
           </div>
@@ -1990,7 +1993,7 @@ export default function AdminDashboard() {
 
       {section === "libraries" && (loading || !Object.keys(libraries).length ? <article className="admin-surface admin-section-surface">
         {loading ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading libraries</b></div> : <div className="admin-panel-empty"><span>▣</span><b>No libraries yet</b>{canManageLibraries && <button type="button" onClick={() => setShowCreateLibrary(true)}>Create your first library</button>}</div>}
-      </article> : <div className="admin-library-list">
+      </article> : librariesLayout !== 1 ? <LibrariesOptions layout={librariesLayout} libraries={libraries} users={users} types={libraryTypes} permissions={libraryPermissions} presetOf={libraryMemberPreset} presetLabel={libraryPresetLabel} update={updateLibraryDraft} setPreset={(path, name, preset) => preset === "none" ? toggleLibraryMember(path, name, false) : applyLibraryPreset(path, name, preset)} setPermission={setLibraryPermission} runTrickplay={(path) => void runTrickplayNow(path)} trickplayAction={trickplayAction} savingLibrary={savingLibrary} savedLibrary={savedLibrary} /> : <div className="admin-library-list">
         {Object.entries(libraries).map(([path, library]) => {
           const accessNames = [...new Set([...users.map((user) => user.name), ...library.members.map((member) => member.name)])].sort();
           const libraryUrl = `/?folder=${encodeURIComponent(path)}`;
