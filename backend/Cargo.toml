@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+memchr = "2"
 axum = { version = "0.8", features = ["multipart"] }
 bcrypt = "0.17"
 reqwest = { version = "0.12", features = ["json", "multipart"] }
@@ -27,3 +28,6 @@ image = "0.25.10"
 junction = "2"
 raw-window-handle = "0.6"
 rfd = "0.15"
+
+[profile.dev.package.memchr]
+opt-level = 3

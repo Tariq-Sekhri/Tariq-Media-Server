@@ -1164,6 +1164,7 @@ export default function AdminDashboard() {
   </section>;
   const headerActions = <>
             {section === "users" && canCreateUsers && <button className="admin-primary-action" type="button" onClick={() => setShowAddUser(true)}>＋ Add user</button>}
+            {section === "metrics" && currentUser?.is_admin && <button type="button" className="admin-clear-metrics-action" disabled={loading || clearingMetrics} onClick={() => void clearMetrics()}>{clearingMetrics ? "Wiping…" : "Wipe all metrics"}</button>}
             {section === "locations" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={openAddLocation}>Add folder</button>}
             {section === "libraries" && <LibrariesLayoutPicker layout={librariesLayout} onChange={setLibrariesLayout} />}
             {section === "libraries" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={() => setShowCreateLibrary(true)}>Create library</button>}
@@ -1281,12 +1282,6 @@ export default function AdminDashboard() {
             <div>
               <p>PERFORMANCE DASHBOARD</p>
               <h2>Client-Side Library Load Times</h2>
-            </div>
-            <div className="admin-metrics-actions">
-              {currentUser?.is_admin && <button type="button" className="admin-clear-metrics-action" disabled={loading || clearingMetrics} onClick={() => void clearMetrics()}>{clearingMetrics ? "Wiping…" : "Wipe all metrics"}</button>}
-              <button type="button" className="admin-primary-action" disabled={loading || clearingMetrics} onClick={() => void refresh()}>
-                {loading ? "Refreshing…" : "Refresh metrics"}
-              </button>
             </div>
           </header>
           {metricsClearMessage && <p className="admin-metrics-clear-message" role="status">{metricsClearMessage}</p>}

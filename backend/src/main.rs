@@ -2483,53 +2483,35 @@ fn is_client_performance_line(line: &str) -> bool {
 }
 
 fn latest_performance_lines(logs_dir: &Path, files: &[String], limit: usize) -> Vec<String> {
-    use std::io::{Read, Seek};
-
+    // The backend runs as a debug build, so a byte-by-byte scan of ~1 GB of
+    // logs took ~30s and the proxy timed out. memchr is compiled optimized
+    // (see Cargo.toml) and finds the sparse performance events quickly.
+    let finder = memchr::memmem::Finder::new(b"event=\"client_performance\"");
     let mut lines = Vec::with_capacity(limit);
-    let mut chunk = vec![0_u8; 64 * 1024];
     for name in files.iter().rev().filter(|name| name.starts_with("tms.")) {
-        let Ok(mut file) = std::fs::File::open(logs_dir.join(name)) else {
+        let Ok(bytes) = std::fs::read(logs_dir.join(name)) else {
             continue;
         };
-        let Ok(mut remaining) = file.metadata().map(|metadata| metadata.len()) else {
-            continue;
-        };
-        let mut reversed_line = Vec::new();
-        while remaining > 0 && lines.len() < limit {
-            let size = remaining.min(chunk.len() as u64) as usize;
-            remaining -= size as u64;
-            if file.seek(std::io::SeekFrom::Start(remaining)).is_err()
-                || file.read_exact(&mut chunk[..size]).is_err()
-            {
-                break;
+        let mut file_lines = Vec::new();
+        let mut last_start = usize::MAX;
+        for position in finder.find_iter(&bytes) {
+            let start = memchr::memrchr(b'\n', &bytes[..position]).map_or(0, |index| index + 1);
+            if start == last_start {
+                continue;
             }
-            for &byte in chunk[..size].iter().rev() {
-                if byte == b'\n' {
-                    if !reversed_line.is_empty() {
-                        reversed_line.reverse();
-                        let line = String::from_utf8_lossy(&reversed_line);
-                        if is_client_performance_line(&line) {
-                            lines.push(line.into_owned());
-                        }
-                        reversed_line.clear();
-                    }
-                    if lines.len() >= limit {
-                        break;
-                    }
-                } else {
-                    reversed_line.push(byte);
-                }
+            last_start = start;
+            let end = memchr::memchr(b'\n', &bytes[position..]).map_or(bytes.len(), |index| position + index);
+            let line = String::from_utf8_lossy(&bytes[start..end]);
+            let line = line.trim_end_matches('\r');
+            if is_client_performance_line(line) {
+                file_lines.push(line.to_owned());
             }
         }
-        if remaining == 0 && !reversed_line.is_empty() && lines.len() < limit {
-            reversed_line.reverse();
-            let line = String::from_utf8_lossy(&reversed_line);
-            if is_client_performance_line(&line) {
-                lines.push(line.into_owned());
+        for line in file_lines.into_iter().rev() {
+            lines.push(line);
+            if lines.len() >= limit {
+                return lines;
             }
-        }
-        if lines.len() >= limit {
-            break;
         }
     }
     lines
