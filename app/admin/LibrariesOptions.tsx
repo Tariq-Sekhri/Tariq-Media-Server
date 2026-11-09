@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 
 /**
- * Candidate layouts for Admin → Libraries. Option 1 is the chosen list-and-detail layout;
- * options 2-5 are variations of it. Every option edits the same library
+ * Candidate layouts for Admin → Libraries. Option 1 is the chosen side-by-side layout;
+ * option 2 is the tabs-and-table alternative. Every option edits the same library
  * drafts through the same handlers, so switching layouts never loses or resaves work.
  * Once one wins, delete the others and the picker.
  */
@@ -16,14 +16,11 @@ type PermissionKey = keyof Omit<Member, "name">;
 type Preset = "none" | "viewer" | "user" | "editor" | "manager";
 type User = { name: string; is_admin: boolean };
 
-export type LibrariesLayout = 1 | 2 | 3 | 4 | 5;
+export type LibrariesLayout = 1 | 2;
 
 export const LIBRARIES_LAYOUTS: readonly { id: LibrariesLayout; hint: string }[] = [
-  { id: 1, hint: "Library list on the left, the selected library on the right" },
-  { id: 2, hint: "Settings and access side by side, access levels as buttons" },
-  { id: 3, hint: "Libraries as tabs, access as a person × permission table" },
-  { id: 4, hint: "People grouped into lanes by access level" },
-  { id: 5, hint: "Settings edited in the list, the detail is access only" },
+  { id: 1, hint: "Library list beside settings and access, access levels as buttons" },
+  { id: 2, hint: "Libraries as tabs, access as a person × permission table" },
 ];
 
 const KEY = "tms.admin.librariesLayout";
@@ -90,11 +87,8 @@ export default function LibrariesOptions(props: LibrariesOptionProps) {
   const typeLabel = (type: ContentType) => props.types.find((option) => option.value === type)?.label ?? type;
   const status = (path: string) => props.savingLibrary === path ? "Saving…" : props.savedLibrary === path ? "Saved" : "";
   const ctx = { ...props, paths, names, isAdmin, memberOf, typeLabel, status };
-  if (props.layout === 2) return <SideBySide {...ctx} />;
-  if (props.layout === 3) return <TabsTable {...ctx} />;
-  if (props.layout === 4) return <Lanes {...ctx} />;
-  if (props.layout === 5) return <SettingsInList {...ctx} />;
-  return <MasterDetail {...ctx} />;
+  if (props.layout === 2) return <TabsTable {...ctx} />;
+  return <SideBySide {...ctx} />;
 }
 
 type Ctx = LibrariesOptionProps & {
@@ -142,15 +136,6 @@ function PermissionChips({ ctx, path, name }: { ctx: Ctx; path: string; name: st
   return <div className="lib-opt-chips">{ctx.permissions.map((permission) => <button key={permission.key} type="button" title={permission.description} aria-pressed={Boolean(member[permission.key])} className={member[permission.key] ? "on" : undefined} onClick={() => ctx.setPermission(path, name, permission.key, !member[permission.key])}>{permission.label}</button>)}</div>;
 }
 
-function AccessList({ ctx, path, chips }: { ctx: Ctx; path: string; chips: boolean }) {
-  return <ul className="lib-opt-access">{ctx.names.map((name) => <li key={name}>
-    <span className="lib-opt-avatar" aria-hidden="true">{name.slice(0, 2).toUpperCase()}</span>
-    <b>{name}</b>
-    <PresetSelect ctx={ctx} path={path} name={name} />
-    {chips && <PermissionChips ctx={ctx} path={path} name={name} />}
-  </li>)}</ul>;
-}
-
 const SELECTED_KEY = "tms.admin.selectedLibrary";
 
 /** The library open in the detail pane, shared by every layout and remembered in this browser. */
@@ -187,22 +172,7 @@ function PresetButtons({ ctx, path, name }: { ctx: Ctx; path: string; name: stri
 
 const Avatar = ({ name }: { name: string }) => <span className="lib-opt-avatar" aria-hidden="true">{name.slice(0, 2).toUpperCase()}</span>;
 
-/* Option 1: list of libraries beside the selected library. */
-function MasterDetail(ctx: Ctx) {
-  const [path, select] = useSelectedLibrary(ctx);
-  const library = ctx.libraries[path];
-  return <div className="lib-opt-split">
-    <LibraryIndex ctx={ctx} path={path} onSelect={select} />
-    <article className="admin-surface lib-opt-detail">
-      <DetailHeader ctx={ctx} path={path} />
-      <LibrarySettings ctx={ctx} path={path} />
-      <h3>Access <small>{library.members.length} enabled</small></h3>
-      <AccessList ctx={ctx} path={path} chips />
-    </article>
-  </div>;
-}
-
-/* Option 2: settings and access side by side in the detail; access levels as buttons, permissions behind Customize. */
+/* Option 1: settings and access side by side in the detail; access levels as buttons, permissions behind Customize. */
 function SideBySide(ctx: Ctx) {
   const [path, select] = useSelectedLibrary(ctx);
   const [custom, setCustom] = useState<string | null>(null);
@@ -238,75 +208,57 @@ function SideBySide(ctx: Ctx) {
   </div>;
 }
 
-/* Option 3: libraries as tabs across the top; access as a person × permission table. */
+/* Option 2: libraries as tabs above one panel; access as a person × permission table. */
+const PERMISSION_ORDER: { key: PermissionKey; short: string }[] = [
+  { key: "can_view", short: "View" },
+  { key: "can_upload", short: "Upload" },
+  { key: "can_download", short: "Downloads" },
+  { key: "can_create_folders", short: "Folders" },
+  { key: "can_move", short: "Move" },
+  { key: "can_rename", short: "Rename" },
+  { key: "can_delete", short: "Delete" },
+];
+
 function TabsTable(ctx: Ctx) {
   const [path, select] = useSelectedLibrary(ctx);
-  return <div className="lib-opt-tabbed">
-    <nav className="lib-opt-tabs" role="tablist" aria-label="Libraries">{ctx.paths.map((candidate) => <button key={candidate} type="button" role="tab" aria-selected={candidate === path} className={candidate === path ? "active" : undefined} onClick={() => select(candidate)}>{candidate}<small>{ctx.libraries[candidate].members.length}</small></button>)}</nav>
-    <article className="admin-surface lib-opt-detail">
-      <DetailHeader ctx={ctx} path={path} />
-      <LibrarySettings ctx={ctx} path={path} />
-      <div className="lib-opt-scroll"><table className="lib-opt-table">
-        <thead><tr><th>Person</th><th>Access</th>{ctx.permissions.map((permission) => <th key={permission.key} title={permission.description}>{permission.label}</th>)}</tr></thead>
+  const library = ctx.libraries[path];
+  const describe = (key: PermissionKey) => ctx.permissions.find((permission) => permission.key === key);
+  return <div className="lib-tabs">
+    <nav className="lib-tabs-bar" role="tablist" aria-label="Libraries">{ctx.paths.map((candidate) => {
+      const item = ctx.libraries[candidate];
+      return <button key={candidate} type="button" role="tab" aria-selected={candidate === path} className={candidate === path ? "active" : undefined} onClick={() => select(candidate)}>
+        <b>{candidate}</b><small>{ctx.typeLabel(item.content_type)} · {item.members.length}</small>
+      </button>;
+    })}</nav>
+    <article className="admin-surface lib-tabs-panel" role="tabpanel" aria-label={path}>
+      <header>
+        <h2><button type="button" className="lib-opt-title" onClick={() => openLibrary(path)}>{path}</button></h2>
+        {ctx.status(path) && <span role="status">{ctx.status(path)}</span>}
+        <LibrarySettings ctx={ctx} path={path} />
+      </header>
+      <div className="lib-tabs-scroll"><table className="lib-tabs-table">
+        <thead>
+          <tr><th rowSpan={2} className="lib-tabs-person">Person <small>{library.members.length} with access</small></th><th rowSpan={2}>Access</th><th colSpan={PERMISSION_ORDER.length} className="lib-tabs-group">Permissions</th></tr>
+          <tr>{PERMISSION_ORDER.map((permission) => <th key={permission.key} title={describe(permission.key)?.description}>{permission.short}</th>)}</tr>
+        </thead>
         <tbody>{ctx.names.map((name) => {
           const member = ctx.memberOf(path, name);
           const admin = ctx.isAdmin(name);
-          return <tr key={name}>
-            <th scope="row"><span className="lib-opt-person-cell"><Avatar name={name} />{name}</span></th>
-            <td><PresetSelect ctx={ctx} path={path} name={name} /></td>
-            {ctx.permissions.map((permission) => <td key={permission.key}><input type="checkbox" aria-label={`${name} ${permission.label} for ${path}`} checked={admin || Boolean(member?.[permission.key])} disabled={admin || !member} onChange={(event) => ctx.setPermission(path, name, permission.key, event.target.checked)} /></td>)}
+          const preset = ctx.presetOf(member);
+          return <tr key={name} className={admin ? "is-admin" : preset === "none" ? "is-none" : undefined}>
+            <th scope="row" className="lib-tabs-person"><span className="lib-opt-person-cell"><Avatar name={name} /><span><b>{name}</b><small>{admin ? "Administrator" : ctx.presetLabel(preset)}</small></span></span></th>
+            {admin ? <td colSpan={PERMISSION_ORDER.length + 1} className="lib-tabs-note">Full access to every library</td> : <>
+              <td><PresetSelect ctx={ctx} path={path} name={name} /></td>
+              {preset === "none" ? <td colSpan={PERMISSION_ORDER.length} className="lib-tabs-note">No access</td>
+                : PERMISSION_ORDER.map((permission) => {
+                  const on = Boolean(member?.[permission.key]);
+                  const label = describe(permission.key)?.label ?? permission.short;
+                  return <td key={permission.key}><button type="button" className={`lib-tabs-toggle${on ? " on" : ""}`} aria-pressed={on} aria-label={`${name}: ${label} in ${path}`} title={label} onClick={() => ctx.setPermission(path, name, permission.key, !on)}>{on ? "✓" : ""}</button></td>;
+                })}
+            </>}
           </tr>;
         })}</tbody>
       </table></div>
-    </article>
-  </div>;
-}
-
-/* Option 4: people grouped into lanes by access level. */
-function Lanes(ctx: Ctx) {
-  const [path, select] = useSelectedLibrary(ctx);
-  const admins = ctx.names.filter(ctx.isAdmin);
-  const others = ctx.names.filter((name) => !ctx.isAdmin(name));
-  return <div className="lib-opt-split">
-    <LibraryIndex ctx={ctx} path={path} onSelect={select} />
-    <article className="admin-surface lib-opt-detail">
-      <DetailHeader ctx={ctx} path={path} />
-      <LibrarySettings ctx={ctx} path={path} />
-      <div className="lib-opt-lanes">{PRESETS.map((preset) => {
-        const people = others.filter((name) => ctx.presetOf(ctx.memberOf(path, name)) === preset);
-        return <section key={preset} className={`is-${preset}`}>
-          <h3>{ctx.presetLabel(preset)} <small>{people.length}</small></h3>
-          {people.map((name) => <div key={name} className="lib-opt-lane-card">
-            <span className="lib-opt-person-cell"><Avatar name={name} /><b>{name}</b></span>
-            <PresetSelect ctx={ctx} path={path} name={name} />
-          </div>)}
-        </section>;
-      })}</div>
-      {admins.length > 0 && <p className="lib-opt-admins">Full access as administrators: {admins.join(", ")}</p>}
-    </article>
-  </div>;
-}
-
-/* Option 5: settings edited in the library list; the detail is access only, with a people filter. */
-function SettingsInList(ctx: Ctx) {
-  const [path, select] = useSelectedLibrary(ctx);
-  const [filter, setFilter] = useState("");
-  const shown = ctx.names.filter((name) => name.toLowerCase().includes(filter.trim().toLowerCase()));
-  return <div className="lib-opt-split is-wide-index">
-    <div className="admin-surface lib-opt-index lib-opt-index-cards">{ctx.paths.map((candidate) => <section key={candidate} className={candidate === path ? "active" : undefined}>
-      <button type="button" className="lib-opt-index-head" aria-current={candidate === path ? "true" : undefined} onClick={() => select(candidate)}><b>{candidate}</b><small>{ctx.status(candidate) || `${ctx.libraries[candidate].members.length} people`}</small></button>
-      <LibrarySettings ctx={ctx} path={candidate} />
-    </section>)}</div>
-    <article className="admin-surface lib-opt-detail">
-      <header><h2>{path} access</h2><input className="lib-opt-filter" type="search" placeholder="Filter people" aria-label="Filter people" value={filter} onChange={(event) => setFilter(event.target.value)} /></header>
-      <ul className="lib-opt-access is-buttons">{shown.map((name) => <li key={name}>
-        <Avatar name={name} />
-        <b>{name}</b>
-        <PresetButtons ctx={ctx} path={path} name={name} />
-        <span />
-        <PermissionChips ctx={ctx} path={path} name={name} />
-      </li>)}</ul>
-      {!shown.length && <p className="lib-opt-admins">No one matches “{filter}”.</p>}
     </article>
   </div>;
 }

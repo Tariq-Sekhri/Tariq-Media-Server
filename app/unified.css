@@ -7215,7 +7215,7 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 .lib-opt-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .lib-opt-chips button { border: 1px solid #30373e; border-radius: 999px; padding: 4px 10px; background: transparent; color: #7f8a92; font-size: 12px; font-weight: 700; cursor: pointer; }
 .lib-opt-chips button.on { border-color: #5a4bb8; background: #221d40; color: #ddd6ff; }
-/* 2 */
+/* shared list and detail */
 .lib-opt-split { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 14px; align-items: start; }
 .lib-opt-index { display: flex; flex-direction: column; gap: 3px; padding: 8px !important; }
 .lib-opt-index button { display: flex; flex-direction: column; gap: 3px; border: 0; border-radius: 8px; padding: 10px 12px; background: transparent; text-align: left; cursor: pointer; }
@@ -7241,49 +7241,51 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 .lib-opt-link { justify-self: start; border: 0; padding: 4px 0; background: none; color: #a99bff; font-size: 12px; font-weight: 750; cursor: pointer; }
 .lib-opt-access.is-buttons li { grid-template-columns: 28px minmax(80px, 160px) auto auto; justify-content: start; }
 .lib-opt-access.is-buttons li > .lib-opt-chips { grid-column: 2 / -1; }
-/* 2 */
+/* 1 */
 .lib-opt-columns { display: grid; grid-template-columns: minmax(200px, 240px) minmax(0, 1fr); gap: 24px; align-items: start; }
 .lib-opt-columns h3 { margin: 0 0 8px; }
 .lib-opt-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; border-right: 1px solid #252b31; padding-right: 20px; }
 .lib-opt-field.is-stacked { flex-direction: column; align-items: stretch; gap: 5px; align-self: stretch; }
-/* 3 */
-.lib-opt-tabbed { display: flex; flex-direction: column; gap: 10px; }
-.lib-opt-tabs { display: flex; gap: 6px; overflow-x: auto; }
-.lib-opt-tabs button { display: inline-flex; flex: none; align-items: center; gap: 8px; border: 1px solid #30373e; border-radius: 8px; padding: 9px 14px; background: #12171b; color: #c3cacf; font-size: 14px; font-weight: 750; cursor: pointer; }
-.lib-opt-tabs button small { border-radius: 999px; padding: 1px 7px; background: #1f252b; color: #8c959c; font-size: 11px; }
-.lib-opt-tabs button.active { border-color: #725de0; background: #251f47; color: #f0edff; }
-.lib-opt-scroll { overflow-x: auto; }
-.lib-opt-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.lib-opt-table th,.lib-opt-table td { padding: 8px 10px; border-bottom: 1px solid #252b31; color: #d5dbdf; text-align: left; white-space: nowrap; }
-.lib-opt-table thead th { color: #858f97; font-size: 12px; font-weight: 700; }
-.lib-opt-table tbody th { font-weight: 700; }
-.lib-opt-table td:nth-child(n+3),.lib-opt-table thead th:nth-child(n+3) { text-align: center; }
-.lib-opt-table input[type="checkbox"] { width: 16px; height: 16px; accent-color: #806bea; }
-/* 4 */
-.lib-opt-lanes { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 10px; overflow-x: auto; }
-.lib-opt-lanes section { display: flex; flex-direction: column; gap: 8px; min-height: 120px; border: 1px solid #252b31; border-radius: 9px; padding: 10px; background: #0f1317; }
-.lib-opt-lanes section.is-none { opacity: .85; }
-.lib-opt-lanes h3 { margin: 0 !important; color: #c3cacf; font-size: 13px; }
-.lib-opt-lanes h3 small { margin-left: 4px; color: #7f8a92; }
-.lib-opt-lane-card { display: flex; flex-direction: column; gap: 7px; border: 1px solid #2c333a; border-radius: 8px; padding: 8px; background: #151a1f; }
-.lib-opt-lane-card b { overflow: hidden; color: #e1e6e9; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.lib-opt-admins { margin: 0; color: #8c959c; font-size: 13px; }
-/* 5 */
-.lib-opt-split.is-wide-index { grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); }
-.lib-opt-index-cards { gap: 6px !important; }
-.lib-opt-index-cards section { display: flex; flex-direction: column; gap: 8px; border: 1px solid transparent; border-radius: 9px; padding: 8px 10px 10px; }
-.lib-opt-index-cards section.active { border-color: #4b3fa0; background: #17142a; }
-.lib-opt-index-cards .lib-opt-settings { gap: 8px 12px; }
-.lib-opt-index-head { display: flex !important; flex-direction: row !important; align-items: baseline; justify-content: space-between; padding: 2px 0 !important; background: transparent !important; }
-.lib-opt-filter { min-width: 0; width: 200px; border: 1px solid #343b42; border-radius: 7px; padding: 7px 10px; background: #12171b; color: #e2e7e9; font-size: 13px; }
+/* 2 */
+.lib-tabs { display: flex; flex-direction: column; }
+.lib-tabs-bar { display: flex; gap: 2px; overflow-x: auto; padding: 0 6px; border-bottom: 1px solid #2c333a; }
+.lib-tabs-bar button { display: flex; flex: none; flex-direction: column; gap: 2px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 10px 16px 9px; background: transparent; color: #9aa4ac; text-align: left; cursor: pointer; }
+.lib-tabs-bar button b { font-size: 14px; }
+.lib-tabs-bar button small { color: #7a848c; font-size: 12px; }
+.lib-tabs-bar button:hover { color: #e1e6e9; }
+.lib-tabs-bar button.active { border-bottom-color: #8e76f5; color: #f2efff; }
+.lib-tabs-panel { display: flex; flex-direction: column; gap: 14px; border-top-left-radius: 0 !important; border-top-right-radius: 0 !important; }
+.lib-tabs-panel > header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.lib-tabs-panel > header h2 { margin: 0; font-size: 20px; }
+.lib-tabs-panel > header > span { color: #8fd8a9; font-size: 12px; font-weight: 700; }
+.lib-tabs-panel > header .lib-opt-settings { margin-left: auto; }
+.lib-tabs-scroll { overflow-x: auto; border: 1px solid #252b31; border-radius: 9px; }
+.lib-tabs-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.lib-tabs-table th,.lib-tabs-table td { padding: 8px 6px; border-bottom: 1px solid #222830; color: #d5dbdf; text-align: center; white-space: nowrap; }
+.lib-tabs-table tbody tr:last-child > * { border-bottom: 0; }
+.lib-tabs-table thead th { background: #12171b; color: #8c959c; font-size: 12px; font-weight: 700; }
+.lib-tabs-table thead tr:first-child th { padding-top: 10px; }
+.lib-tabs-group { border-bottom-color: #2c333a !important; color: #a99bff !important; letter-spacing: .3px; }
+.lib-tabs-person { position: sticky; left: 0; z-index: 1; min-width: 190px; padding-left: 14px !important; background: #11161a; text-align: left !important; }
+thead .lib-tabs-person { background: #12171b; }
+.lib-tabs-person small { display: block; margin-top: 2px; color: #7a848c; font-weight: 600; }
+.lib-tabs-person b { display: block; color: #e8ecee; font-size: 14px; }
+.lib-tabs-table tbody tr:hover > * { background: #161b20; }
+.lib-tabs-table tr.is-none .lib-opt-avatar { background: #1c2026; color: #7f8a92; }
+.lib-tabs-table tr.is-admin .lib-opt-avatar { background: #16302a; color: #8fd8a9; }
+.lib-tabs-note { color: #7f8a92 !important; font-size: 12px; text-align: left !important; padding-left: 14px !important; }
+.lib-tabs-toggle { display: inline-grid; place-items: center; width: 30px; height: 30px; border: 1px solid #343b42; border-radius: 7px; background: #12171b; color: #fff; font-size: 14px; font-weight: 900; cursor: pointer; }
+.lib-tabs-toggle:hover { border-color: #725de0; }
+.lib-tabs-toggle.on { border-color: #725de0; background: #5b48c8; }
 @media (max-width: 760px) {
-  .lib-opt-split,.lib-opt-split.is-wide-index,.lib-opt-columns { grid-template-columns: minmax(0, 1fr); }
-  .lib-opt-index:not(.lib-opt-index-cards) { flex-direction: row; overflow-x: auto; }
-  .lib-opt-index:not(.lib-opt-index-cards) button { flex: none; }
+  .lib-opt-split,.lib-opt-columns { grid-template-columns: minmax(0, 1fr); }
+  .lib-opt-index { flex-direction: row; overflow-x: auto; }
+  .lib-opt-index button { flex: none; }
+  .lib-tabs-panel > header .lib-opt-settings { margin-left: 0; }
+  .lib-tabs-person { min-width: 150px; }
   .lib-opt-stack { border-right: 0; padding-right: 0; }
   .lib-opt-access li,.lib-opt-access.is-buttons li { grid-template-columns: 28px minmax(0, 1fr) auto; }
   .lib-opt-access li > .lib-opt-chips,.lib-opt-access.is-buttons li > .lib-opt-seg { grid-column: 2 / -1; }
-  .lib-opt-lanes { grid-template-columns: repeat(5, minmax(150px, 70vw)); }
   .lib-opt-detail > header { flex-wrap: wrap; }
   .ui-option-picker > span { display: none; }
 }
