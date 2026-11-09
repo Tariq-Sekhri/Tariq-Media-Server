@@ -53,8 +53,30 @@ export type AuthSession = {
   user: SessionUser;
 };
 
+// Media elements and stream segments cannot send an Authorization header.
+// The server accepts this same-site cookie for file requests instead.
+const SESSION_COOKIE = "tms_session";
+const syncSessionCookie = (token: string) => {
+  if (typeof document === "undefined") return;
+  try {
+    const current = document.cookie.split("; ").find((pair) => pair.startsWith(`${SESSION_COOKIE}=`))?.slice(SESSION_COOKIE.length + 1) ?? "";
+    if (current === token) return;
+    const secure = location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = token
+      ? `${SESSION_COOKIE}=${token}; Path=/; Max-Age=34560000; SameSite=Lax${secure}`
+      : `${SESSION_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+  } catch {
+    // Cookies can be unavailable in some embedded contexts.
+  }
+};
+
 export const getSessionToken = () => {
   if (typeof window === "undefined") return "";
+  const token = readSessionToken();
+  syncSessionCookie(token);
+  return token;
+};
+const readSessionToken = () => {
   // Older installs kept the permanent device credential separately from an
   // expiring access token. Promote it locally without contacting the server.
   const deviceToken = localStorage.getItem(SESSION_REFRESH_TOKEN_KEY);
@@ -73,6 +95,7 @@ export const getSessionUser = (): SessionUser | null => {
 export const hasActiveCachedSession = () => Boolean(getSessionToken() && getSessionUser());
 export const rememberSession = (token: string, user: SessionUser) => {
   localStorage.setItem(SESSION_TOKEN_KEY, token);
+  syncSessionCookie(token);
   localStorage.setItem(SESSION_USER_KEY, JSON.stringify(user));
   localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
   localStorage.removeItem(SESSION_REFRESH_TOKEN_KEY);
@@ -81,6 +104,7 @@ export const rememberSession = (token: string, user: SessionUser) => {
 };
 export const clearSession = () => {
   localStorage.removeItem(SESSION_TOKEN_KEY);
+  syncSessionCookie("");
   localStorage.removeItem(SESSION_USER_KEY);
   localStorage.removeItem(SESSION_REFRESH_TOKEN_KEY);
   localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
@@ -235,3 +259,6 @@ export const logOut = async () => {
     clearSession();
   }
 };
+
+// Restore the media cookie for sessions saved before it existed.
+if (typeof window !== "undefined") getSessionToken();

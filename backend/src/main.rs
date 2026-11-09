@@ -2111,6 +2111,9 @@ async fn main() {
         )
         .nest("/transcodes", transcode_files)
         .nest_service("/browser-media", ServeDir::new(state.browser_media_dir.clone()))
+        // Every file and per-file endpoint is checked against the caller's
+        // library access before it reaches a handler or static file service.
+        .layer(axum::middleware::from_fn_with_state(state.clone(), file_access_guard))
         // Library responses can be many megabytes of repetitive JSON. Mobile
         // WebViews otherwise spend most of startup transferring that payload.
         .layer(CompressionLayer::new())
@@ -3539,6 +3542,214 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
         .strip_prefix("Bearer ")
 }
 
+/// Media elements cannot send an Authorization header, so the web app mirrors
+/// its session token into this same-site cookie for file requests only.
+const SESSION_COOKIE: &str = "tms_session";
+const FILE_ACCESS_TTL: Duration = Duration::from_secs(5);
+
+fn session_cookie(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get_all(axum::http::header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .find_map(|pair| pair.trim().strip_prefix(SESSION_COOKIE)?.strip_prefix('='))
+        .filter(|token| !token.is_empty())
+}
+
+struct FileAccess {
+    user: StoredUser,
+    libraries: BTreeMap<String, LibraryConfig>,
+}
+
+type FileAccessCache = std::sync::Mutex<HashMap<String, (Instant, Option<Arc<FileAccess>>)>>;
+
+fn file_access_cache() -> &'static FileAccessCache {
+    static CACHE: std::sync::OnceLock<FileAccessCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// Thumbnails and stream segments arrive in bursts, so a short-lived cache
+/// avoids rereading sessions, users and libraries for every one of them.
+async fn file_access(state: &AppState, headers: &HeaderMap) -> Option<Arc<FileAccess>> {
+    let token = bearer_token(headers).or_else(|| session_cookie(headers))?.to_owned();
+    if let Some((checked_at, access)) = file_access_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&token)
+        .cloned()
+        && checked_at.elapsed() < FILE_ACCESS_TTL
+    {
+        return access;
+    }
+    let access = match user_for_token(state, &token).await {
+        Some(user) => {
+            let libraries = if user.is_admin { BTreeMap::new() } else { read_libraries(state).await };
+            Some(Arc::new(FileAccess { user, libraries }))
+        }
+        None => None,
+    };
+    let mut cache = file_access_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if cache.len() >= 512 {
+        cache.retain(|_, (checked_at, _)| checked_at.elapsed() < FILE_ACCESS_TTL);
+        if cache.len() >= 512 {
+            cache.clear();
+        }
+    }
+    cache.insert(token, (Instant::now(), access.clone()));
+    access
+}
+
+#[derive(Debug, PartialEq)]
+enum FileRule {
+    Open,
+    Deny,
+    SignedIn,
+    Admin,
+    LibraryPath(String),
+    Transcode(String),
+    FolderCover(String),
+}
+
+fn nested_rest<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
+    let rest = path.strip_prefix(prefix)?;
+    (rest.is_empty() || rest.starts_with('/')).then(|| rest.trim_start_matches('/'))
+}
+
+fn query_parameter(query: Option<&str>, name: &str) -> Option<String> {
+    query?.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if key != name {
+            return None;
+        }
+        urlencoding::decode(&value.replace('+', " ")).ok().map(|value| value.into_owned())
+    })
+}
+
+fn library_path_rule(path: String) -> FileRule {
+    let traverses = path.contains(':')
+        || path.contains('\0')
+        || path.starts_with(['/', '\\'])
+        || path.split(['/', '\\']).any(|part| part == "..");
+    if traverses { FileRule::Deny } else { FileRule::LibraryPath(path) }
+}
+
+/// Decide what a request needs from its path and query alone.
+fn file_rule(path: &str, query: Option<&str>) -> FileRule {
+    if let Some(rest) = nested_rest(path, "/media") {
+        return match urlencoding::decode(rest) {
+            Ok(decoded) => library_path_rule(decoded.into_owned()),
+            Err(_) => FileRule::Deny,
+        };
+    }
+    if let Some(rest) = nested_rest(path, "/transcodes") {
+        let key = rest.split('/').next().unwrap_or("");
+        let valid = !key.is_empty()
+            && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        return if valid { FileRule::Transcode(key.to_owned()) } else { FileRule::Deny };
+    }
+    if let Some(rest) = nested_rest(path, "/folder-covers") {
+        return match urlencoding::decode(rest) {
+            Ok(name) if !name.is_empty() && !name.contains(['/', '\\', ':']) => {
+                FileRule::FolderCover(name.into_owned())
+            }
+            _ => FileRule::Deny,
+        };
+    }
+    if nested_rest(path, "/trash-files").is_some() {
+        return FileRule::Admin;
+    }
+    if ["/browser-media", "/folder-downloads", "/profile-avatars"]
+        .iter()
+        .any(|prefix| nested_rest(path, prefix).is_some())
+    {
+        return FileRule::SignedIn;
+    }
+    let parameter = match path {
+        "/api/grid-thumb" | "/api/subtitle" => "path",
+        "/api/preview-frame" | "/api/subtitles" | "/api/embedded-subtitle" | "/api/qualities"
+        | "/api/transcode" | "/api/transcode/variant" | "/api/skip-segments" => "video_path",
+        "/api/remote-subtitle" | "/api/title-metadata" => return FileRule::SignedIn,
+        _ => return FileRule::Open,
+    };
+    match query_parameter(query, parameter) {
+        Some(value) => library_path_rule(value),
+        None => FileRule::SignedIn,
+    }
+}
+
+fn transcode_source_cache() -> &'static std::sync::Mutex<HashMap<String, String>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, String>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+async fn transcode_key_source(state: &AppState, key: String) -> Option<String> {
+    let cached = transcode_source_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&key)
+        .cloned();
+    if cached.is_some() {
+        return cached;
+    }
+    let directory = state.transcodes_dir.join(&key);
+    let library_root = state.library_root.clone();
+    let source = tokio::task::spawn_blocking(move || transcode_cache_source(&directory, &library_root))
+        .await
+        .ok()
+        .flatten()?;
+    let mut cache = transcode_source_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if cache.len() >= 4096 {
+        cache.clear();
+    }
+    cache.insert(key, source.clone());
+    Some(source)
+}
+
+async fn file_rule_allows(state: &AppState, access: &FileAccess, rule: FileRule) -> bool {
+    let user = &access.user;
+    match rule {
+        FileRule::Open | FileRule::SignedIn => true,
+        FileRule::Deny => false,
+        FileRule::Admin => user.is_admin,
+        _ if user.is_admin => true,
+        FileRule::LibraryPath(path) => can_view_library_path(user, &access.libraries, &path),
+        FileRule::Transcode(key) => transcode_key_source(state, key)
+            .await
+            .is_some_and(|source| can_view_library_path(user, &access.libraries, &source)),
+        FileRule::FolderCover(filename) => {
+            let mut covers = read_folder_covers(&state.automatic_folder_covers_path).await;
+            covers.extend(read_folder_covers(&state.folder_covers_path).await);
+            covers.iter().any(|(folder, cover)| {
+                cover.as_str() == Some(filename.as_str())
+                    && can_view_library_path(user, &access.libraries, folder)
+            })
+        }
+    }
+}
+
+async fn file_access_guard(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let rule = file_rule(request.uri().path(), request.uri().query());
+    if rule == FileRule::Open {
+        return next.run(request).await;
+    }
+    if rule == FileRule::Deny {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let Some(access) = file_access(&state, request.headers()).await else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if !file_rule_allows(&state, &access, rule).await {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    next.run(request).await
+}
+
 fn device_name(user_agent: &str) -> String {
     let agent = user_agent.to_ascii_lowercase();
     if agent.contains("iphone") || agent.contains("ipad") {
@@ -3629,7 +3840,10 @@ fn auth_session_response(session: &StoredSession, user: &StoredUser) -> AuthSess
 }
 
 async fn authenticated_user(state: &AppState, headers: &HeaderMap) -> Option<StoredUser> {
-    let token = bearer_token(headers)?;
+    user_for_token(state, bearer_token(headers)?).await
+}
+
+async fn user_for_token(state: &AppState, token: &str) -> Option<StoredUser> {
     let started = Instant::now();
     let sessions_started = Instant::now();
     let sessions = read_sessions(&state.sessions_path).await;
@@ -12130,6 +12344,8 @@ fn subtitle_response(source: &str, cache_control: &'static str) -> Response {
 fn safe_library_path(root: &Path, relative: &str) -> Result<PathBuf, StatusCode> {
     if relative.is_empty()
         || Path::new(relative).is_absolute()
+        // `C:folder` is drive-relative on Windows and escapes the library root.
+        || relative.contains(':')
         || relative.split(['/', '\\']).any(|part| part == "..")
     {
         return Err(StatusCode::BAD_REQUEST);
@@ -18844,6 +19060,42 @@ mod tests {
     }
 
     #[test]
+    fn file_requests_map_to_the_library_access_they_need() {
+        assert_eq!(file_rule("/media/Movies/a%20b.mp4", None), FileRule::LibraryPath("Movies/a b.mp4".into()));
+        assert_eq!(file_rule("/media", None), FileRule::LibraryPath(String::new()));
+        for escape in ["/media/Movies/..%2F..%2Fx", "/media/C:x", "/media/%2Fetc", "/media/Movies%5C..%5C..%5Cx"] {
+            assert_eq!(file_rule(escape, None), FileRule::Deny, "{escape}");
+        }
+        assert_eq!(file_rule("/mediax/a", None), FileRule::Open);
+        assert_eq!(
+            file_rule("/api/grid-thumb", Some("path=Kids%2Fshow.mkv&w=3")),
+            FileRule::LibraryPath("Kids/show.mkv".into())
+        );
+        assert_eq!(
+            file_rule("/api/transcode", Some("video_path=Private+Lib/x.mkv")),
+            FileRule::LibraryPath("Private Lib/x.mkv".into())
+        );
+        assert_eq!(file_rule("/api/transcode", Some("session=abc")), FileRule::SignedIn);
+        assert_eq!(file_rule("/api/subtitles", Some("video_path=..%2Fx")), FileRule::Deny);
+        assert_eq!(file_rule("/api/title-metadata", Some("title=x")), FileRule::SignedIn);
+        assert_eq!(file_rule("/transcodes/abc123/master.m3u8", None), FileRule::Transcode("abc123".into()));
+        assert_eq!(file_rule("/transcodes/..%2Fx/a", None), FileRule::Deny);
+        assert_eq!(file_rule("/folder-covers/cover.jpg", None), FileRule::FolderCover("cover.jpg".into()));
+        assert_eq!(file_rule("/trash-files/x", None), FileRule::Admin);
+        assert_eq!(file_rule("/browser-media/k.mp4", None), FileRule::SignedIn);
+        assert_eq!(file_rule("/api/library", None), FileRule::Open);
+    }
+
+    #[test]
+    fn media_cookie_is_read_from_the_cookie_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert("cookie", HeaderValue::from_static("a=1; tms_session=tok-1; b=2"));
+        assert_eq!(session_cookie(&headers), Some("tok-1"));
+        headers.insert("cookie", HeaderValue::from_static("tms_sessionx=bad; tms_session="));
+        assert_eq!(session_cookie(&headers), None);
+    }
+
+    #[test]
     fn library_paths_are_visible_only_to_viewing_members() {
         let (viewer, admin, libraries) = visibility_fixture();
         assert!(can_view_library_path(&viewer, &libraries, "Shared/Show/episode.mkv"));
@@ -19134,7 +19386,7 @@ mod tests {
     #[test]
     fn safe_library_path_rejects_traversal_and_absolute_paths() {
         let root = Path::new(r"C:\media");
-        for unsafe_path in ["", "../secret", "Movies/../../secret", r"C:\secret"] {
+        for unsafe_path in ["", "../secret", "Movies/../../secret", r"C:\secret", "C:secret", "Movies/C:x"] {
             assert_eq!(
                 safe_library_path(root, unsafe_path),
                 Err(StatusCode::BAD_REQUEST)
