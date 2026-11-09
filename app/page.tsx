@@ -5765,9 +5765,6 @@ export default function Home() {
     const matchedTitleName = catalogTitle
       ? titleMetadata[titleMetadataKey(catalogTitle.path, catalogTitle.evidence.kind)]?.name
       : undefined;
-    const downloadLabel = catalogTitle
-      ? `Download ${matchedTitleName || (catalogTitle.evidence.kind === "series" ? "show" : "movie")}`
-      : "Download folder";
     const episodeId = item.kind === "video" ? episodeNumbers(`${item.parent ?? ""}/${item.name}`) : null;
     const seriesPath = titlePathForVideo(item);
     const episodeInfo = episodeId && seriesPath ? resolveEpisodeMetadata(titleMetadata[titleMetadataKey(seriesPath, "series")]?.videos, episodeId.season, episodeId.episode) : undefined;
@@ -5858,7 +5855,7 @@ export default function Home() {
               setContextItem(null);
             }}
           >
-            <MenuIcon name="download" />{downloadLabel}
+            <MenuIcon name="download" />Download
           </button>
         )}
         {!item.trashed && item.path && (
