@@ -119,11 +119,7 @@ const torrentStateLabel = (download?: MagnetDownload) => {
 };
 
 export default function MagnetDownloader({ destination, destinations = [], initialMagnetLink = "", activeDownloadHash, onClose }: MagnetDownloaderProps) {
-  const destinationOptions = useMemo(() => {
-    const paths = destination ? [destination, ...destinations] : destinations;
-    return paths.filter((path, index) => path && paths.indexOf(path) === index);
-  }, [destination, destinations]);
-  const [selectedDestination, setSelectedDestination] = useState(() => destinationOptions[0] ?? "");
+  const effectiveDestination = destination || destinations.find((path) => path) || "";
   const [magnetLink, setMagnetLink] = useState(() => initialMagnetLink);
   const [status, setStatus] = useState<MagnetStatus | null>(null);
   const [activeHash, setActiveHash] = useState<string | null>(activeDownloadHash ?? null);
@@ -133,9 +129,6 @@ export default function MagnetDownloader({ destination, destinations = [], initi
   const [requestError, setRequestError] = useState("");
   const [statusError, setStatusError] = useState("");
   const requestedHash = useMemo(() => magnetInfoHash(magnetLink), [magnetLink]);
-  const effectiveDestination = destinationOptions.includes(selectedDestination)
-    ? selectedDestination
-    : destinationOptions[0] ?? "";
 
   const loadStatus = useCallback(async (quiet = true) => {
     if (!quiet) setPreparing(true);
@@ -322,14 +315,6 @@ export default function MagnetDownloader({ destination, destinations = [], initi
                 ))}
               </div>
             </section>
-
-            <label className="magnet-destination-field">
-              <span>Save to</span>
-              <select value={effectiveDestination} onChange={(event) => setSelectedDestination(event.target.value)} disabled={destinationOptions.length < 2}>
-                {destinationOptions.map((path) => <option key={path} value={path}>{path}</option>)}
-              </select>
-              {destinationOptions.length < 2 && <small>No subfolders are available in this library yet.</small>}
-            </label>
 
             <label className="magnet-link-field">
               <span>Magnet link</span>

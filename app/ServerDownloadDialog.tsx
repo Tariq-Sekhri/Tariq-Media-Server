@@ -96,7 +96,7 @@ export default function ServerDownloadDialog({
 }) {
   const [url, setUrl] = useState("");
   const [mode, setMode] = useState<"video" | "audio">("video");
-  const [selectedDestination, setSelectedDestination] = useState(destination);
+  const selectedDestination = destination;
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshingCookies, setRefreshingCookies] = useState(false);
@@ -321,16 +321,6 @@ export default function ServerDownloadDialog({
               <span>Download link</span>
               <input value={url} onChange={(event) => { setUrl(event.target.value); resetInspection(); }} placeholder="magnet:?… or https://…" autoFocus required />
               <small>Magnet links switch to the secure qBittorrent flow automatically. Other links are inspected with yt-dlp.</small>
-            </label>
-            <label className="field">
-              <span>Current location</span>
-              <select value={selectedDestination} onChange={(event) => {
-                const nextDestination = event.target.value;
-                setSelectedDestination(nextDestination);
-                resetInspection();
-              }}>
-                {normalizedDestinations.filter((item) => item.contentType !== "movies_tv").map((item) => <option key={item.path} value={item.path}>{item.path}</option>)}
-              </select>
             </label>
             <label className="field">
               <span>Mode</span>
