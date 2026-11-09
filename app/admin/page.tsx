@@ -95,16 +95,16 @@ type AdminProcess = {
   actions: string[];
 };
 
-const sectionCopy: Record<AdminSection, { eyebrow: string; title: string }> = {
-  overview: { eyebrow: "ADMINISTRATION", title: "Admin access" },
-  notifications: { eyebrow: "", title: "Requests" },
-  users: { eyebrow: "PEOPLE", title: "Users" },
-  metrics: { eyebrow: "SERVER PERFORMANCE", title: "Metrics" },
-  processes: { eyebrow: "LIVE SERVER WORK", title: "Running work" },
-  locations: { eyebrow: "SERVER STORAGE", title: "Library locations" },
-  libraries: { eyebrow: "MEDIA ACCESS", title: "Libraries" },
-  downloads: { eyebrow: "SERVER TOOLS", title: "Server downloads" },
-  trash: { eyebrow: "", title: "Trash" },
+const sectionCopy: Record<AdminSection, { title: string }> = {
+  overview: { title: "Admin access" },
+  notifications: { title: "Requests" },
+  users: { title: "Users" },
+  metrics: { title: "Metrics" },
+  processes: { title: "Running work" },
+  locations: { title: "Library locations" },
+  libraries: { title: "Libraries" },
+  downloads: { title: "Server downloads" },
+  trash: { title: "Trash" },
 };
 const libraryTypes: { value: LibraryContentType; label: string }[] = [
   { value: "mixed", label: "Mixed media" },
@@ -1135,7 +1135,6 @@ export default function AdminDashboard() {
     };
   }, [downloadStatus, limitRate, maxSleepInterval, saveThrottleSettings, section, sleepInterval]);
 
-  const copy = sectionCopy[section];
   const canManageUser = (user: AdminUser) =>
     (canEditUsers || canDeleteUsers) && (Boolean(currentUser?.is_admin) || !user.is_admin);
   const accountType = (user: AdminUser) =>
@@ -1230,10 +1229,9 @@ export default function AdminDashboard() {
 
     <section className="admin-workspace">
 
-      <div className="admin-page-header-bar">
+      <div className={`admin-page-header-bar${section === "processes" || section === "trash" ? " is-empty" : ""}`}>
       <label className="admin-category-selector"><span>Admin</span><select aria-label="Admin category" value={section} onChange={event => setSection(event.target.value as AdminSection)}>{availableSections.map(value => <option key={value} value={value}>{sectionCopy[value].title}</option>)}</select></label>
         <header className="admin-page-header">
-          <div>{copy.eyebrow && <p>{copy.eyebrow}</p>}<h1>{copy.title}</h1></div>
           <div className="admin-page-header-actions">
             {section === "locations" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={openAddLocation}>Add folder</button>}
             {section === "libraries" && <LibrariesLayoutPicker layout={librariesLayout} onChange={setLibrariesLayout} />}
