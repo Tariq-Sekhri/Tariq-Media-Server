@@ -7307,3 +7307,5 @@ thead .lib-tabs-person { background: #12171b; }
 .admin-users-surface > footer { padding: 13px 0; background: transparent; }
 .admin-users-surface .admin-user-table-head,
 .admin-users-surface .admin-user-row { padding-left: 0; padding-right: 0; }
+.admin-users-surface > header.admin-users-actions { justify-content: flex-end; }
+.admin-users-surface > header.admin-users-actions:empty { display: none; }
