@@ -8,6 +8,7 @@ import type { YtDlpJob } from "../ServerDownloadDialog";
 import { isActiveWork, isFinishedWork, needsWorkAttention, workTitle } from "../lib/running-work";
 import DiscoverConfiguration from "../discover/Configuration";
 import MenuIcon from "../MenuIcon";
+import AdminTrash from "./Trash";
 import MobileNavigation from "../MobileNavigation";
 import { mainNavigation } from "../lib/navigation";
 import { RequestsPanel } from "../discover/Requests";
@@ -25,7 +26,7 @@ type LibraryLocation = { name: string; path: string; external: boolean; availabl
 type LibraryLocationsResponse = { main_root: string; main_root_available: boolean; locations: LibraryLocation[] };
 type FolderBrowserResponse = { current_path: string | null; parent_path: string | null; folders: { name: string; path: string }[] };
 type DeleteRequest = { id: string; path: string; requested_by: number; requested_by_name: string; requested_at: number };
-type AdminSection = "overview" | "notifications" | "users" | "metrics" | "processes" | "locations" | "libraries" | "downloads" | "discover";
+type AdminSection = "overview" | "notifications" | "users" | "metrics" | "processes" | "locations" | "libraries" | "downloads" | "discover" | "trash";
 type AdminLoadTiming = {
   cacheState: "hit" | "miss";
   cacheLoadTimeMs: number;
@@ -46,7 +47,7 @@ const cacheAdminUsers = (userId: number | undefined, users: AdminUser[]) => {
   if (typeof window === "undefined" || !userId) return;
   try { sessionStorage.setItem(adminUsersCacheKey(userId), JSON.stringify({ savedAt: Date.now(), users })); } catch { /* Private browsing or a full session store should not block administration. */ }
 };
-const adminSections: AdminSection[] = ["overview", "notifications", "users", "metrics", "processes", "locations", "libraries", "downloads", "discover"];
+const adminSections: AdminSection[] = ["overview", "notifications", "users", "metrics", "processes", "locations", "libraries", "downloads", "discover", "trash"];
 const adminSectionFromUrl = () => {
   if (typeof window === "undefined") return "users" as AdminSection;
   const candidate = new URLSearchParams(window.location.search).get("section");
@@ -104,6 +105,7 @@ const sectionCopy: Record<AdminSection, { eyebrow: string; title: string; descri
   libraries: { eyebrow: "MEDIA ACCESS", title: "Libraries", description: "Choose each library type and who can access it." },
   discover: { eyebrow: "DISCOVER", title: "Discover configuration", description: "Catalog connection, download services, and request access." },
   downloads: { eyebrow: "SERVER TOOLS", title: "Server downloads", description: "Manage yt-dlp readiness, download pacing, and per-user storage." },
+  trash: { eyebrow: "", title: "Trash", description: "" },
 };
 const libraryTypes: { value: LibraryContentType; label: string }[] = [
   { value: "mixed", label: "Mixed media" },
@@ -363,6 +365,7 @@ export default function AdminDashboard() {
     ...(canManageLibraries ? ["locations" as const] : []),
     ...(canManageLibraries ? ["libraries" as const] : []),
     ...(canManageDownloads ? ["downloads" as const, "discover" as const] : []),
+    ...(currentUser?.is_admin ? ["trash" as const] : []),
   ], [canCreateUsers, canDeleteUsers, canEditUsers, canLogOutAdmins, canLogOutOtherUsers, canManageDownloads, canManageLibraries, canViewLogs, canViewProcesses, canViewUsers, currentUser?.is_admin]);
 
   const loadDeleteRequests = useCallback(async () => {
@@ -1222,20 +1225,20 @@ export default function AdminDashboard() {
           </div>
         )}
         {canManageDownloads && <button className={section === "discover" ? "active" : ""} aria-current={section === "discover" ? "page" : undefined} onClick={() => setSection("discover")}>Discover configuration</button>}
-        {currentUser?.is_admin && <a className="admin-sidebar-link" href="/?section=trash"><span aria-hidden="true">♲</span>Trash</a>}
+        {currentUser?.is_admin && <button className={section === "trash" ? "active" : ""} aria-current={section === "trash" ? "page" : undefined} onClick={() => setSection("trash")}><span aria-hidden="true">♲</span>Trash</button>}
       </nav>
     </aside>
 
     <section className="admin-workspace">
 
       <div className="admin-page-header-bar">
-      <label className="admin-category-selector"><span>Admin</span><select aria-label="Admin category" value={section} onChange={event => { if (event.target.value === "trash") { window.location.assign("/?section=trash"); return; } setSection(event.target.value as AdminSection); }}>{availableSections.map(value => <option key={value} value={value}>{sectionCopy[value].title}</option>)}{currentUser?.is_admin && <option value="trash">Trash</option>}</select></label>
+      <label className="admin-category-selector"><span>Admin</span><select aria-label="Admin category" value={section} onChange={event => setSection(event.target.value as AdminSection)}>{availableSections.map(value => <option key={value} value={value}>{sectionCopy[value].title}</option>)}</select></label>
         <header className="admin-page-header">
           <div>{copy.eyebrow && <p>{copy.eyebrow}</p>}<h1>{copy.title}</h1>{copy.description && <span>{copy.description}</span>}</div>
           <div className="admin-page-header-actions">
             {section === "locations" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={openAddLocation}>Add folder</button>}
             {section === "libraries" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={() => setShowCreateLibrary(true)}>Create library</button>}
-            {section !== "processes" && <button type="button" aria-label={loading ? "Refreshing" : "Refresh"} onClick={() => void refresh()} disabled={loading || clearingMetrics}><MenuIcon name="restore" />{loading ? "Refreshing" : "Refresh"}</button>}
+            {section !== "processes" && section !== "trash" && <button type="button" aria-label={loading ? "Refreshing" : "Refresh"} onClick={() => void refresh()} disabled={loading || clearingMetrics}><MenuIcon name="restore" />{loading ? "Refreshing" : "Refresh"}</button>}
           </div>
         </header>
         {section === "metrics" && <div className="admin-load-debug" aria-live="polite">
@@ -1252,6 +1255,7 @@ export default function AdminDashboard() {
         <RequestsPanel canManage refreshKey={discoverRequestRefresh} title="Discover requests" onCountChange={setPendingDiscoverRequests} />
       </article>}
 
+      {section === "trash" && currentUser?.is_admin && <AdminTrash />}
       {section === "discover" && canManageDownloads && <article className="admin-surface admin-section-surface"><DiscoverConfiguration /></article>}
 
       {section === "notifications" && currentUser?.is_admin && <article className="admin-surface admin-section-surface">

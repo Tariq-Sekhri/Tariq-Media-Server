@@ -7171,3 +7171,19 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
  .app-confirm-dialog footer button { flex: 1; min-height: 48px; }
  .app-confirm-dialog .app-confirm-close { min-height: 44px; flex-basis: 44px; }
 }
+
+.admin-trash-surface > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.admin-trash-surface > header h2 { margin: 0; font-size: 15px; }
+.admin-trash-surface > header span { color: #8c959c; font-size: 12px; }
+.admin-danger-action { border: 1px solid #6b3138; border-radius: 7px; padding: 8px 12px; background: #2a1518; color: #f2a7ae; font-size: 12px; font-weight: 800; cursor: pointer; }
+.admin-danger-action:hover:not(:disabled) { background: #3a1b20; color: #ffd0d4; }
+.admin-trash-message { margin: 12px 0 0; color: #b9c0c5; font-size: 12px; }
+.admin-trash-list { margin: 14px 0 0; padding: 0; list-style: none; border-top: 1px solid #282e34; }
+.admin-trash-list li { display: grid; grid-template-columns: 22px minmax(0,1fr) auto auto; align-items: center; gap: 12px; padding: 12px 4px; border-bottom: 1px solid #252b31; }
+.admin-trash-list li > span { color: #8e76f5; font-size: 15px; }
+.admin-trash-list li > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.admin-trash-list b { overflow: hidden; color: #e1e6e9; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-trash-list small { overflow: hidden; color: #858f97; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-trash-list li > button:not(.admin-danger-action) { border: 1px solid #3a424a; border-radius: 7px; padding: 8px 12px; background: #181d22; color: #dfe4e7; font-size: 12px; font-weight: 750; cursor: pointer; }
+.admin-trash-list button:disabled,.admin-trash-surface button:disabled { opacity: .55; cursor: default; }
+@media (max-width: 700px) { .admin-trash-list li { grid-template-columns: 22px minmax(0,1fr) auto; } .admin-trash-list li > .admin-danger-action { grid-column: 2 / -1; justify-self: start; } .admin-trash-list li > button { min-height: 40px; } }
