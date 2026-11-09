@@ -38,6 +38,7 @@ use tower_http::{
 use walkdir::WalkDir;
 mod discovery;
 mod qbit;
+mod preview_discovery;
 mod uploads;
 mod ytdlp_archive;
 
@@ -125,6 +126,7 @@ struct AppState {
     finished_trickplay_libraries: Arc<tokio::sync::Mutex<BTreeMap<String, FinishedTrickplay>>>,
     trickplay_run_lock: Arc<tokio::sync::Mutex<()>>,
     trickplay_control_notify: Arc<tokio::sync::Notify>,
+    preview_discovery: Arc<preview_discovery::DiscoverySignal>,
     active_thumbnail_libraries: Arc<tokio::sync::Mutex<BTreeMap<String, ActiveThumbnails>>>,
     finished_thumbnail_libraries: Arc<tokio::sync::Mutex<BTreeMap<String, FinishedThumbnails>>>,
     active_browser_media_libraries: Arc<tokio::sync::Mutex<BTreeMap<String, ActiveBrowserMedia>>>,
@@ -1872,6 +1874,7 @@ async fn main() {
         finished_trickplay_libraries: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
         trickplay_run_lock: Arc::new(tokio::sync::Mutex::new(())),
         trickplay_control_notify: Arc::new(tokio::sync::Notify::new()),
+        preview_discovery: Arc::new(preview_discovery::DiscoverySignal::default()),
         active_thumbnail_libraries: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
         finished_thumbnail_libraries: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
         active_browser_media_libraries: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
@@ -1898,6 +1901,7 @@ async fn main() {
     uploads::spawn_upload_session_sweep(state.clone());
     spawn_trickplay_cache_sweep(state.clone());
     spawn_background_indexer(state.clone());
+    spawn_preview_discovery_worker(state.clone());
     for (library, config) in read_libraries(&state).await {
         schedule_browser_media_library(state.clone(), library.clone());
         if config.trickplay_enabled {
@@ -6242,6 +6246,8 @@ async fn invalidate_library_cache(state: &AppState) {
         .library_cache_generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     cache.clear();
+    drop(cache);
+    state.preview_discovery.changed();
 }
 
 async fn create_folder(
@@ -12806,6 +12812,74 @@ enum TrickplayRun {
     Manual,
 }
 
+// Mutations wake discovery promptly; the fallback covers files copied by other apps.
+// Discovery never bypasses idle, pause, or single-FFmpeg scheduling policies.
+const PREVIEW_DISCOVERY_POLL: Duration = Duration::from_secs(30);
+const PREVIEW_DISCOVERY_DEBOUNCE: Duration = Duration::from_millis(250);
+
+fn spawn_preview_discovery_worker(state: AppState) {
+    supervise("preview-discovery", move || {
+        let state = state.clone();
+        async move {
+            let mut last_scan = Instant::now();
+            let mut known_pending = preview_discovery::PendingWork::default();
+            let mut poll = tokio::time::interval(PREVIEW_DISCOVERY_POLL);
+            poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            poll.tick().await;
+            loop {
+                tokio::select! {
+                    _ = state.preview_discovery.notify.notified() => {
+                        tokio::time::sleep(PREVIEW_DISCOVERY_DEBOUNCE).await;
+                    },
+                    _ = poll.tick() => {},
+                }
+                let change = state.preview_discovery.take_change();
+                let started = Instant::now();
+                let mut scanned = 0;
+                let mut busy = 0;
+                let mut pending = 0;
+                let mut queued = 0;
+                for (library, config) in read_libraries(&state).await {
+                    if !config.trickplay_enabled { continue; }
+                    if state.active_trickplay_libraries.lock().await.contains_key(&library) {
+                        busy += 1;
+                        continue;
+                    }
+                    let inventory = trickplay_inventory(&state, &library).await;
+                    scanned += 1;
+                    pending += inventory.0.len();
+                    let paths = inventory.0.clone();
+                    let root = state.library_root.clone();
+                    let keys = tokio::task::spawn_blocking(move || paths.iter().filter_map(|path| {
+                        let relative = path.strip_prefix(&root).ok()?;
+                        let metadata = path.metadata().ok()?;
+                        Some(trickplay_key(&relative.to_string_lossy().replace('\\', "/"), &metadata))
+                    }).collect()).await.unwrap_or_default();
+                    if known_pending.has_new(&library, keys) && !inventory.0.is_empty() {
+                        queued += 1;
+                        schedule_trickplay_inventory(state.clone(), library.clone(), TrickplayRun::Automatic, None, Some(inventory));
+                        schedule_thumbnail_library(state.clone(), library);
+                    }
+                }
+                let detected = Instant::now();
+                let details = serde_json::json!({
+                    "trigger": if change.is_some() { "change" } else { "poll" },
+                    "signal_to_detection_ms": change.map(|at| detected.duration_since(at).as_millis() as u64),
+                    "scan_duration_ms": started.elapsed().as_millis() as u64,
+                    "scan_gap_ms": detected.duration_since(last_scan).as_millis() as u64,
+                    "poll_interval_ms": PREVIEW_DISCOVERY_POLL.as_millis() as u64,
+                    "scanned_libraries": scanned,
+                    "busy_libraries": busy,
+                    "pending_videos": pending,
+                    "queued_libraries": queued,
+                });
+                tracing::info!(target: SERVER_METRICS_TARGET, event = "preview_discovery", details = %details, "Preview discovery timing");
+                last_scan = detected;
+            }
+        }
+    });
+}
+
 fn schedule_library_preload(
     state: AppState,
     library: String,
@@ -12821,6 +12895,16 @@ fn schedule_trickplay_library(
     library: String,
     run: TrickplayRun,
     initiated_by: Option<String>,
+) {
+    schedule_trickplay_inventory(state, library, run, initiated_by, None);
+}
+
+fn schedule_trickplay_inventory(
+    state: AppState,
+    library: String,
+    run: TrickplayRun,
+    initiated_by: Option<String>,
+    inventory: Option<(Vec<PathBuf>, usize, usize)>,
 ) {
     tokio::spawn(async move {
         let started_at = unix_now();
@@ -12856,8 +12940,10 @@ fn schedule_trickplay_library(
         // Recognising finished previews must not wait for the idle window, or a
         // library that has nothing left to do would sit at 0% for as long as
         // somebody is using the computer.
-        let (videos, mut completed_videos, mut total_videos) =
-            trickplay_inventory(&state, &library).await;
+        let (videos, mut completed_videos, mut total_videos) = match inventory {
+            Some(inventory) => inventory,
+            None => trickplay_inventory(&state, &library).await,
+        };
         {
             let mut active = state.active_trickplay_libraries.lock().await;
             if let Some(trickplay) = active.get_mut(&library) {
@@ -13695,44 +13781,44 @@ async fn trickplay_inventory(state: &AppState, library: &str) -> (Vec<PathBuf>, 
     let library_root = state.library_root.clone();
     let trickplay_dir = state.trickplay_dir.clone();
     let durations = state.library_duration_cache.lock().await.clone();
-    tokio::task::spawn_blocking(move || {
-        let videos = WalkDir::new(root)
-            .follow_links(true)
-            .into_iter()
-            .filter_map(Result::ok)
-            .map(|entry| entry.into_path())
-            .filter(|path| path.is_file() && is_video_file(path))
-            .filter(|path| {
-                let (Ok(relative), Ok(metadata)) = (path.strip_prefix(&library_root), path.metadata()) else { return true };
-                let key = trickplay_key(&relative.to_string_lossy().replace('\\', "/"), &metadata);
-                !trickplay_dir.join(key).join("no-video").is_file()
-            })
-            .collect::<Vec<_>>();
-        let total = videos.len();
-        let (complete, pending): (Vec<_>, Vec<_>) = videos.into_iter().partition(|path| {
-            let Ok(relative) = path.strip_prefix(&library_root) else {
-                return false;
-            };
-            let Ok(metadata) = path.metadata() else {
-                return false;
-            };
-            let video_path = relative.to_string_lossy().replace('\\', "/");
-            let duration = durations
-                .get(&video_path)
-                .filter(|cached| {
-                    cached.size == metadata.len()
-                        && cached.modified_at == file_modified_secs(&metadata)
-                })
-                .and_then(|cached| cached.duration);
-            trickplay_is_complete(
-                &trickplay_dir.join(trickplay_key(&video_path, &metadata)),
-                duration,
-            )
-        });
-        (pending, complete.len(), total)
-    })
-    .await
-    .unwrap_or_default()
+    tokio::task::spawn_blocking(move || scan_trickplay_inventory(&root, &library_root, &trickplay_dir, &durations))
+        .await
+        .unwrap_or_default()
+}
+
+fn scan_trickplay_inventory(
+    root: &Path,
+    library_root: &Path,
+    trickplay_dir: &Path,
+    durations: &HashMap<String, CachedLibraryDuration>,
+) -> (Vec<PathBuf>, usize, usize) {
+    let mut pending = Vec::new();
+    let mut complete = 0;
+    let mut total = 0;
+    // WalkDir already knows each entry's type. Do not stat every image/folder,
+    // then stat each video twice again in separate filtering passes.
+    for entry in WalkDir::new(root).follow_links(true).into_iter().filter_map(Result::ok) {
+        if !entry.file_type().is_file() || !is_video_file(entry.path()) { continue; }
+        let path = entry.path();
+        let (Ok(relative), Ok(metadata)) = (path.strip_prefix(library_root), entry.metadata()) else {
+            total += 1;
+            pending.push(entry.into_path());
+            continue;
+        };
+        let video_path = relative.to_string_lossy().replace('\\', "/");
+        let output = trickplay_dir.join(trickplay_key(&video_path, &metadata));
+        if output.join("no-video").is_file() { continue; }
+        total += 1;
+        let duration = durations.get(&video_path)
+            .filter(|cached| cached.size == metadata.len() && cached.modified_at == file_modified_secs(&metadata))
+            .and_then(|cached| cached.duration);
+        if trickplay_is_complete(&output, duration) {
+            complete += 1;
+        } else {
+            pending.push(entry.into_path());
+        }
+    }
+    (pending, complete, total)
 }
 
 fn trickplay_keys_under(root: &Path, logical_prefix: &str) -> Vec<String> {
@@ -19355,6 +19441,7 @@ async fn publish_ytdlp_job(
             "Some downloaded files could not be published"
         );
     }
+    state.preview_discovery.changed();
     Ok(published)
 }
 

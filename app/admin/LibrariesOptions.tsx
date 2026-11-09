@@ -19,8 +19,6 @@ export type LibrariesOptionProps = {
   update: (path: string, update: (library: Library) => Library) => void;
   setPreset: (path: string, name: string, preset: Preset) => void;
   setPermission: (path: string, name: string, permission: PermissionKey, enabled: boolean) => void;
-  runTrickplay: (path: string) => void;
-  trickplayAction: string;
   savingLibrary: string;
   savedLibrary: string;
 };
@@ -114,7 +112,6 @@ function SideBySide(ctx: Ctx) {
           <label className="lib-opt-field is-stacked"><span>Type</span><TypeSelect ctx={ctx} path={path} /></label>
           <Switch label="Static folders" checked={library.folder_structure_static} onChange={(checked) => ctx.update(path, (current) => ({ ...current, folder_structure_static: checked }))} />
           <Switch label="Timeline previews" checked={library.trickplay_enabled} onChange={(checked) => ctx.update(path, (current) => ({ ...current, trickplay_enabled: checked }))} />
-          {library.trickplay_enabled && <button type="button" className="lib-opt-ghost" disabled={ctx.trickplayAction === path} onClick={() => ctx.runTrickplay(path)}>{ctx.trickplayAction === path ? "Queuing…" : "Generate previews"}</button>}
         </section>
         <section>
           <h3>Access <small>{ctx.accessCount(path)} enabled</small></h3>

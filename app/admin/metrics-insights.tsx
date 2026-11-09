@@ -125,11 +125,17 @@ export default function MetricsInsights({ lines, serverLines, errorLines, device
   // Server endpoint timings, merged across logged windows.
   type Endpoint = { route: string; count: number; errors: number; total_ms: number; max_ms: number; buckets: number[] };
   const endpoints = new Map<string, Endpoint>();
+  const previewDiscovery: { signalMs: number | null; scanMs: number; gapMs: number; pending: number; busy: number; trigger: string }[] = [];
   const stageEvents: { id: string; from: string; to: string; at: number; created: number; hash: string }[] = [];
   const downloads: { source: string; id: string; outcome: string; at: number; seconds: number; bytes: number }[] = [];
   for (const line of serverLines) {
     const event = field(line, "event");
-    if (event === "endpoint_stats") {
+    if (event === "preview_discovery") {
+      const details = parseDetails(line) as Details | null;
+      if (details && typeof details.scan_duration_ms === "number") {
+        previewDiscovery.push({ signalMs: typeof details.signal_to_detection_ms === "number" ? details.signal_to_detection_ms : null, scanMs: details.scan_duration_ms, gapMs: Number(details.scan_gap_ms) || 0, pending: Number(details.pending_videos) || 0, busy: Number(details.busy_libraries) || 0, trigger: String(details.trigger) });
+      }
+    } else if (event === "endpoint_stats") {
       const windows = parseDetails(line);
       if (!Array.isArray(windows)) continue;
       for (const window of windows as Endpoint[]) {
@@ -147,6 +153,9 @@ export default function MetricsInsights({ lines, serverLines, errorLines, device
       downloads.push({ source: field(line, "source") ?? "", id: field(line, "id") ?? "", outcome: field(line, "outcome") ?? "", at: Number(field(line, "at")) || 0, seconds: Number(field(line, "duration_s")) || 0, bytes: Number(field(line, "bytes")) || 0 });
     }
   }
+  const previewSignals = previewDiscovery.flatMap((sample) => sample.signalMs === null ? [] : [sample.signalMs]);
+  const previewScans = previewDiscovery.map((sample) => sample.scanMs);
+  const latestPreview = previewDiscovery[0];
   const endpointP95 = (endpoint: Endpoint) => {
     let seen = 0;
     for (let index = 0; index < endpoint.buckets.length; index += 1) {
@@ -219,6 +228,19 @@ export default function MetricsInsights({ lines, serverLines, errorLines, device
       <Stat label="App errors (7 days)" value={String(errors.length)} warn={errorsLastDay > 0}
         detail={`${errorsLastDay} in the last 24 hours`} />
     </div>
+
+    <section>
+      <h3>Preview discovery</h3>
+      <div className="admin-insight-stats">
+        <Stat label="Change to scan completion" value={previewSignals.length ? formatMs(percentile(previewSignals, 0.95)) : "No samples yet"}
+          detail={previewSignals.length ? `p95 of ${previewSignals.length} change-triggered scans` : "Waiting for a library change"} />
+        <Stat label="Inventory scan" value={previewScans.length ? formatMs(percentile(previewScans, 0.95)) : "No samples yet"}
+          detail={previewScans.length ? `p95 of ${previewScans.length} scans` : "Waiting for the worker"} />
+        <Stat label="Latest discovery" value={latestPreview ? `${latestPreview.pending} pending` : "No samples yet"}
+          detail={latestPreview ? `${latestPreview.trigger === "change" ? "Library change" : "Periodic check"}; ${formatMs(latestPreview.gapMs)} since previous scan; ${latestPreview.busy} active libraries skipped` : "Checks outside changes every 30 seconds"} />
+      </div>
+      <p className="admin-insight-note">TMS file changes wake discovery after a short debounce. Outside changes use a 30-second check plus scan time. These timings exclude waiting for idle and preview generation.</p>
+    </section>
 
     {modes.length > 0 && <section>
       <h3>Direct play vs transcoded</h3>

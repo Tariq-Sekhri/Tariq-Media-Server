@@ -341,7 +341,6 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
   const [revokingSession, setRevokingSession] = useState("");
   const [savingLibrary, setSavingLibrary] = useState("");
   const [savedLibrary, setSavedLibrary] = useState("");
-  const [trickplayAction, setTrickplayAction] = useState("");
   const [showCreateLibrary, setShowCreateLibrary] = useState(false);
   const [libraryName, setLibraryName] = useState("");
   const [libraryContentType, setLibraryContentType] = useState<LibraryContentType>("mixed");
@@ -971,21 +970,6 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
       setSavingLibrary("");
     }
   }, []);
-  const runTrickplayNow = async (path: string) => {
-    if (trickplayAction) return;
-    setTrickplayAction(path);
-    setError("");
-    try {
-      const response = await authFetch(`${API_BASE}/api/libraries/${encodeURIComponent(path)}/trickplay`, { method: "POST" });
-      if (!response.ok) throw new Error(`Could not queue timeline previews for ${path} (server returned ${response.status})`);
-      setSavedLibrary(path);
-      setTimeout(() => setSavedLibrary((current) => current === path ? "" : current), 4000);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not queue timeline previews");
-    } finally {
-      setTrickplayAction("");
-    }
-  };
   useEffect(() => {
     const nextSnapshots = Object.fromEntries(Object.entries(libraries).map(([path, library]) => [path, libraryFingerprint(library)]));
     const changed = Object.entries(libraries).filter(([path, library]) => librarySnapshotsRef.current[path] !== libraryFingerprint(library));
@@ -1939,7 +1923,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
 
       {section === "libraries" && (loading || !Object.keys(libraries).length ? <article className="admin-surface admin-section-surface">
         {loading ? <AdminLoading label="Loading libraries" /> : <div className="admin-panel-empty"><span>▣</span><b>No libraries yet</b>{canManageLibraries && <button type="button" onClick={() => setShowCreateLibrary(true)}>Create your first library</button>}</div>}
-      </article> : <LibrariesOptions libraries={libraries} users={users} types={libraryTypes} permissions={libraryPermissions} presetOf={libraryMemberPreset} presetLabel={libraryPresetLabel} update={updateLibraryDraft} setPreset={(path, name, preset) => preset === "none" ? toggleLibraryMember(path, name, false) : applyLibraryPreset(path, name, preset)} setPermission={setLibraryPermission} runTrickplay={(path) => void runTrickplayNow(path)} trickplayAction={trickplayAction} savingLibrary={savingLibrary} savedLibrary={savedLibrary} />)}
+      </article> : <LibrariesOptions libraries={libraries} users={users} types={libraryTypes} permissions={libraryPermissions} presetOf={libraryMemberPreset} presetLabel={libraryPresetLabel} update={updateLibraryDraft} setPreset={(path, name, preset) => preset === "none" ? toggleLibraryMember(path, name, false) : applyLibraryPreset(path, name, preset)} setPermission={setLibraryPermission} savingLibrary={savingLibrary} savedLibrary={savedLibrary} />)}
     </section>
 
     {showCreateLibrary && <div className="admin-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreateLibrary(); }}>
