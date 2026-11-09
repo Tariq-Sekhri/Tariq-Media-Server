@@ -1187,7 +1187,6 @@ export default function AdminDashboard() {
       </div>
     </header>
     <aside className="admin-sidebar">
-      <span className="admin-sidebar-label">ADMINISTRATION</span>
       <nav aria-label="Administration sections">
         {currentUser?.is_admin && (
           <div style={{ display: "contents" }}>
