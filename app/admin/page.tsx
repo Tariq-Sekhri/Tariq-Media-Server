@@ -1690,7 +1690,6 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
               </a>
             </h2>
             <code>{libraryLocations?.main_root ?? "Loading…"}</code>
-            <span>New libraries created in TMS live here by default.</span>
           </div>
           <span className={`admin-location-status ${libraryLocations?.main_root_available ? "online" : "offline"}`}><i />{libraryLocations?.main_root_available ? "Available" : "Unavailable"}</span>
           {currentUser?.is_admin && <details className="admin-location-move">
@@ -1723,8 +1722,8 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
                 <span>Attached without moving the source folder.</span>
               </div>
               <div className="admin-location-actions">
-                <span className={`admin-location-status ${location.available ? "online" : "offline"}`}><i />{location.available ? "Available" : "Offline"}</span>
                 <button type="button" className="admin-location-remove" disabled={detachingLocation === `${location.parent_library ?? "library"}:${location.folder_path ?? location.name}`} onClick={() => void detachLibraryLocation(location)}>{detachingLocation === `${location.parent_library ?? "library"}:${location.folder_path ?? location.name}` ? "Removing…" : "Remove"}</button>
+                <span className={`admin-location-status ${location.available ? "online" : "offline"}`}><i />{location.available ? "Available" : "Offline"}</span>
               </div>
             </article>
           );
