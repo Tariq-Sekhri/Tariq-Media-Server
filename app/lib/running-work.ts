@@ -1,5 +1,5 @@
 export const isActiveWork = (status: string) => ["running", "downloading", "scanning library"].includes(status);
-export const showWork = (id: string, status: string, showFinished: boolean) => showFinished || id.startsWith("browser-media-finished:") || !isFinishedWork(status) || needsWorkAttention(status);
+export const showWork = (status: string, showFinished: boolean) => showFinished || !isFinishedWork(status) || needsWorkAttention(status);
 export const isFinishedWork = (status: string) => ["complete", "completed", "finished with errors"].includes(status);
 export const needsWorkAttention = (status: string) => ["failed", "interrupted", "finished with errors", "status unavailable"].includes(status);
 

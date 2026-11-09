@@ -3,14 +3,14 @@ const assert = require('node:assert/strict');
 const { load } = require('./load-ts.cjs');
 const work = load('app/lib/running-work.ts');
 
-test('library scans are active and completed audio libraries remain visible', () => {
+test('finished-work toggle hides completed work while keeping scans and failures visible', () => {
   assert.equal(work.isActiveWork('scanning library'), true);
   assert.equal(work.isFinishedWork('scanning library'), false);
-  assert.equal(work.showWork('browser-media-finished:Library', 'complete', false), true);
-  assert.equal(work.showWork('trickplay-finished:Library', 'complete', false), false);
-  assert.equal(work.showWork('trickplay-finished:Library', 'complete', true), true);
-  assert.equal(work.showWork('browser-media:Library', 'scanning library', false), true);
-  assert.equal(work.showWork('other', 'finished with errors', false), true);
+  assert.equal(work.showWork('complete', false), false);
+  assert.equal(work.showWork('completed', false), false);
+  assert.equal(work.showWork('complete', true), true);
+  assert.equal(work.showWork('scanning library', false), true);
+  assert.equal(work.showWork('finished with errors', false), true);
 });
 
 test('paused and unavailable work count as inactive; failed finishes still need attention', () => {

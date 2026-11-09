@@ -1541,7 +1541,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
           {(processRefreshError || (processUpdatedAt !== null && processClock - processUpdatedAt > 15_000)) && <div className="admin-work-feedback" aria-live="polite">
             <strong role="status">{processRefreshError || "Live status is delayed"}. Displayed work may be outdated.</strong>
           </div>}
-          {loading ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading running work</b></div> : processes.some((process) => showWork(process.id, process.status, showFinishedWork)) ? <div className="admin-process-list">{processes.filter((process) => showWork(process.id, process.status, showFinishedWork)).map((process) => {
+          {loading ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading running work</b></div> : processes.some((process) => showWork(process.status, showFinishedWork)) ? <div className="admin-process-list">{processes.filter((process) => showWork(process.status, showFinishedWork)).map((process) => {
             const isYtDlp = process.id.startsWith("ytdlp:");
             const isFailed = needsWorkAttention(process.status);
             const isLive = isActiveWork(process.status);
