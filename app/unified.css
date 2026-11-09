@@ -7362,7 +7362,7 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 @media (min-width: 901px) {
   .admin-user-identity > div { flex: 1; flex-direction: row; align-items: center; gap: 16px; }
   .admin-user-identity > div > b { flex: none; max-width: 160px; }
-  .admin-user-identity .admin-user-storage { flex-direction: row; align-items: center; gap: 12px; }
+  .admin-user-identity .admin-user-storage { flex: 1; width: auto; flex-direction: row; align-items: center; justify-content: center; gap: 12px; }
   .admin-user-storage small { min-width: 0; }
   .admin-user-storage progress { flex: 0 1 120px; min-width: 48px; width: 120px; margin-top: 0; }
 }
