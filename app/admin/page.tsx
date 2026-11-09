@@ -95,16 +95,16 @@ type AdminProcess = {
   actions: string[];
 };
 
-const sectionCopy: Record<AdminSection, { eyebrow: string; title: string; description: string }> = {
-  overview: { eyebrow: "ADMINISTRATION", title: "Admin access", description: "Your account can open this dashboard, but no admin tools are assigned yet." },
-  notifications: { eyebrow: "", title: "Requests", description: "" },
-  users: { eyebrow: "PEOPLE", title: "Users", description: "Create and review the accounts that use this server." },
-  metrics: { eyebrow: "SERVER PERFORMANCE", title: "Metrics", description: "Cache hits and load times across all users." },
-  processes: { eyebrow: "LIVE SERVER WORK", title: "Running work", description: "Every active TMS job, across all users and server services." },
-  locations: { eyebrow: "SERVER STORAGE", title: "Library locations", description: "Attach media folders from any drive without moving their contents." },
-  libraries: { eyebrow: "MEDIA ACCESS", title: "Libraries", description: "Choose each library type and who can access it." },
-  downloads: { eyebrow: "SERVER TOOLS", title: "Server downloads", description: "Manage yt-dlp readiness, download pacing, and per-user storage." },
-  trash: { eyebrow: "", title: "Trash", description: "" },
+const sectionCopy: Record<AdminSection, { eyebrow: string; title: string }> = {
+  overview: { eyebrow: "ADMINISTRATION", title: "Admin access" },
+  notifications: { eyebrow: "", title: "Requests" },
+  users: { eyebrow: "PEOPLE", title: "Users" },
+  metrics: { eyebrow: "SERVER PERFORMANCE", title: "Metrics" },
+  processes: { eyebrow: "LIVE SERVER WORK", title: "Running work" },
+  locations: { eyebrow: "SERVER STORAGE", title: "Library locations" },
+  libraries: { eyebrow: "MEDIA ACCESS", title: "Libraries" },
+  downloads: { eyebrow: "SERVER TOOLS", title: "Server downloads" },
+  trash: { eyebrow: "", title: "Trash" },
 };
 const libraryTypes: { value: LibraryContentType; label: string }[] = [
   { value: "mixed", label: "Mixed media" },
@@ -1145,7 +1145,7 @@ export default function AdminDashboard() {
     setter: Dispatch<SetStateAction<AdminPermissions>>,
   ) => <section className="admin-account-permissions">
     <header>
-      <div><b>Granular administration</b><small>Grant only the server controls this person needs.</small></div>
+      <div><b>Granular administration</b></div>
       <div className="admin-permission-presets">
         <button type="button" onClick={() => setter(accountPreset("users"))}>User manager</button>
         <button type="button" onClick={() => setter(accountPreset("auditor"))}>Metrics viewer</button>
@@ -1233,7 +1233,7 @@ export default function AdminDashboard() {
       <div className="admin-page-header-bar">
       <label className="admin-category-selector"><span>Admin</span><select aria-label="Admin category" value={section} onChange={event => setSection(event.target.value as AdminSection)}>{availableSections.map(value => <option key={value} value={value}>{sectionCopy[value].title}</option>)}</select></label>
         <header className="admin-page-header">
-          <div>{copy.eyebrow && <p>{copy.eyebrow}</p>}<h1>{copy.title}</h1>{copy.description && <span>{copy.description}</span>}</div>
+          <div>{copy.eyebrow && <p>{copy.eyebrow}</p>}<h1>{copy.title}</h1></div>
           <div className="admin-page-header-actions">
             {section === "locations" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={openAddLocation}>Add folder</button>}
             {section === "libraries" && <LibrariesLayoutPicker layout={librariesLayout} onChange={setLibrariesLayout} />}
@@ -1258,7 +1258,7 @@ export default function AdminDashboard() {
       {section === "trash" && currentUser?.is_admin && <AdminTrash />}
 
       {section === "notifications" && currentUser?.is_admin && <article className="admin-surface admin-section-surface">
-        <header><div><p>DELETE REQUESTS</p><h2>Deletion requests</h2><span>Move an item to recoverable Trash or dismiss the request.</span></div></header>
+        <header><div><p>DELETE REQUESTS</p><h2>Deletion requests</h2></div></header>
         {loading ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading requests</b></div> : deleteRequests.length ? <div className="admin-delete-requests">
           {deleteRequests.map((entry) => <div className="admin-delete-request" key={entry.id}>
             <div><b>{entry.path.split("/").pop()}</b><small>{entry.path}</small><span>Requested by {entry.requested_by_name} · {new Date(entry.requested_at * 1000).toLocaleString()}</span></div>
@@ -1275,7 +1275,7 @@ export default function AdminDashboard() {
       </article>}
 
       {section === "users" && <article className="admin-surface admin-users-surface admin-section-surface">
-        <header><div><p>ACCOUNTS</p><h2>TMS users</h2><span>Account administration and library access are controlled separately.</span></div>{canCreateUsers && <button className="admin-primary-action" onClick={() => setShowAddUser(true)}>＋ Add user</button>}</header>
+        <header><div><p>ACCOUNTS</p><h2>TMS users</h2></div>{canCreateUsers && <button className="admin-primary-action" onClick={() => setShowAddUser(true)}>＋ Add user</button>}</header>
         <div className="admin-user-table-head"><span>User</span><span>Access</span><span>Password</span><span>Created</span><span>Last active</span><span /></div>
         {loading ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading users</b></div> : users.length ? <div className="admin-user-table">{users.map((user) => <div className="admin-user-row" key={user.id}><div className="admin-user-identity"><span>{user.name.slice(0, 2).toUpperCase()}</span><div><b>{user.name}</b><small>User #{user.id} · {formatBytes(user.used_bytes)} used · {formatBytes(user.storage_quota_bytes)}</small></div></div><span className={`admin-account-type ${user.is_admin ? "admin" : user.admin_permissions?.access_admin_panel ? "limited" : ""}`}>{accountType(user)}</span><span className={`admin-password-state ${user.password_set ? "set" : "open"}`}><i />{user.password_set ? "Protected" : "No password"}</span><time>{formatCreatedDate(user.created_at)}</time><time>{user.last_active_at ? formatCreatedDate(user.last_active_at) : "Never"}</time><span className="admin-row-actions">{canManageSessionsFor(user) && <button className="admin-row-action" onClick={() => void openUserSessions(user)}>Devices</button>}{canManageUser(user) && <button className="admin-row-action" onClick={() => openUserEditor(user)}>Manage</button>}</span></div>)}</div> : <div className="admin-panel-empty"><span>♙</span><b>No users yet</b>{canCreateUsers && <button onClick={() => setShowAddUser(true)}>Add your first user</button>}</div>}
       </article>}
@@ -1286,7 +1286,6 @@ export default function AdminDashboard() {
             <div>
               <p>PERFORMANCE DASHBOARD</p>
               <h2>Client-Side Library Load Times</h2>
-              <span>Aggregated from the last 5,000 performance logs across all users.</span>
             </div>
             <div className="admin-metrics-actions">
               {currentUser?.is_admin && <button type="button" className="admin-clear-metrics-action" disabled={loading || clearingMetrics} onClick={() => void clearMetrics()}>{clearingMetrics ? "Wiping…" : "Wipe all metrics"}</button>}
@@ -1595,7 +1594,6 @@ export default function AdminDashboard() {
             <div>
               <p>LIVE QUEUE</p>
               <h2>{processes.filter((process) => isActiveWork(process.status)).length} active · {processes.filter((process) => !isActiveWork(process.status) && !isFinishedWork(process.status)).length} waiting / inactive · {processes.filter((process) => needsWorkAttention(process.status)).length} need attention</h2>
-              <span>Background work waits for 10 minutes of computer idle time and no playback or tracked transfers. Max speed bypasses the idle requirement.</span>
             </div>
             <button type="button" className="admin-primary-action" disabled={refreshingJobs} onClick={() => void refreshAdminJobs()}>
               {refreshingJobs ? "Refreshing…" : "Refresh work"}
@@ -1786,11 +1784,11 @@ export default function AdminDashboard() {
 
       {section === "downloads" && <div className="admin-library-list">
         <article className="admin-surface admin-library-card">
-          <header><div><p>QUOTA OVERVIEW</p><h2>Per-user server storage</h2><span>Committed media and Trash count as used; active uploads and downloads are reserved.</span></div></header>
+          <header><div><p>QUOTA OVERVIEW</p><h2>Per-user server storage</h2></div></header>
           <div className="admin-quota-list">{users.length ? users.map((user) => <div key={user.id}><div><b>{user.name}</b><span>{formatBytes(user.used_bytes)} used · {formatBytes(user.reserved_bytes)} reserved · {formatBytes(user.storage_quota_bytes)}</span></div><progress max={Math.max(1, user.storage_quota_bytes ?? Math.max(1, user.used_bytes + user.reserved_bytes))} value={user.used_bytes + user.reserved_bytes} /></div>) : <p role="status">{loading ? "Loading storage usage…" : "No user storage usage available."}</p>}</div>
         </article>
         <article className="admin-surface admin-library-card">
-          <header><div><p>DOWNLOAD PACING</p><h2>yt-dlp throttling</h2><span>Slow playlist downloads to reduce rate limits. Applies to every inspect and download job.</span></div>{throttleSaveState && <span className="admin-library-save-status" role="status">{throttleSaveState === "saving" ? "Saving…" : "Saved"}</span>}</header>
+          <header><div><p>DOWNLOAD PACING</p><h2>yt-dlp throttling</h2></div>{throttleSaveState && <span className="admin-library-save-status" role="status">{throttleSaveState === "saving" ? "Saving…" : "Saved"}</span>}</header>
           <div className="admin-library-settings admin-ytdlp-throttle">
             <label><span>Sleep interval</span><input type="number" min="0" max="3600" step="1" value={sleepInterval} onChange={(event) => setSleepInterval(event.target.value)} /><small>Seconds to wait between playlist items. 0 disables.</small></label>
             <label><span>Max sleep</span><input type="number" min="0" max="3600" step="1" value={maxSleepInterval} onChange={(event) => setMaxSleepInterval(event.target.value)} /><small>Random extra delay up to this many seconds.</small></label>
@@ -1802,9 +1800,6 @@ export default function AdminDashboard() {
             <div>
               <p>AUTHENTICATION & ACCESS</p>
               <h2>YouTube & Media Cookies</h2>
-              <span>
-                Provide YouTube account cookies so yt-dlp can access age-restricted tracks, private/unlisted playlists, and bypass bot verification.
-              </span>
             </div>
             <div className="admin-cookie-header-actions">
               <button
