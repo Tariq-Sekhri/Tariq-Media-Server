@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 /**
  * Candidate layouts for Admin → Libraries. Option 1 is the chosen side-by-side layout;
- * option 2 is the tabs-and-table alternative. Every option edits the same library
+ * options 2-5 try the person × permission table in different arrangements. Every option edits the same library
  * drafts through the same handlers, so switching layouts never loses or resaves work.
  * Once one wins, delete the others and the picker.
  */
@@ -16,11 +16,14 @@ type PermissionKey = keyof Omit<Member, "name">;
 type Preset = "none" | "viewer" | "user" | "editor" | "manager";
 type User = { name: string; is_admin: boolean };
 
-export type LibrariesLayout = 1 | 2;
+export type LibrariesLayout = 1 | 2 | 3 | 4 | 5;
 
 export const LIBRARIES_LAYOUTS: readonly { id: LibrariesLayout; hint: string }[] = [
   { id: 1, hint: "Library list beside settings and access, access levels as buttons" },
-  { id: 2, hint: "Libraries as tabs, access as a person × permission table" },
+  { id: 2, hint: "Library list beside a person × permission table" },
+  { id: 3, hint: "Every library on one page, each with its own table" },
+  { id: 4, hint: "Tabs for people; each row is a library" },
+  { id: 5, hint: "Library tabs, grouped permissions, set a permission for everyone" },
 ];
 
 const KEY = "tms.admin.librariesLayout";
@@ -87,7 +90,10 @@ export default function LibrariesOptions(props: LibrariesOptionProps) {
   const typeLabel = (type: ContentType) => props.types.find((option) => option.value === type)?.label ?? type;
   const status = (path: string) => props.savingLibrary === path ? "Saving…" : props.savedLibrary === path ? "Saved" : "";
   const ctx = { ...props, paths, names, isAdmin, memberOf, typeLabel, status };
-  if (props.layout === 2) return <TabsTable {...ctx} />;
+  if (props.layout === 2) return <ListTable {...ctx} />;
+  if (props.layout === 3) return <StackedTables {...ctx} />;
+  if (props.layout === 4) return <PersonTabs {...ctx} />;
+  if (props.layout === 5) return <BulkTable {...ctx} />;
   return <SideBySide {...ctx} />;
 }
 
@@ -208,57 +214,120 @@ function SideBySide(ctx: Ctx) {
   </div>;
 }
 
-/* Option 2: libraries as tabs above one panel; access as a person × permission table. */
-const PERMISSION_ORDER: { key: PermissionKey; short: string }[] = [
-  { key: "can_view", short: "View" },
-  { key: "can_upload", short: "Upload" },
-  { key: "can_download", short: "Downloads" },
-  { key: "can_create_folders", short: "Folders" },
-  { key: "can_move", short: "Move" },
-  { key: "can_rename", short: "Rename" },
-  { key: "can_delete", short: "Delete" },
+/* Options 2-5 share a person × permission table; they differ in how you reach it. */
+const PERMISSION_ORDER: { key: PermissionKey; short: string; group: string }[] = [
+  { key: "can_view", short: "View", group: "Watch" },
+  { key: "can_download", short: "Downloads", group: "Watch" },
+  { key: "can_upload", short: "Upload", group: "Add" },
+  { key: "can_create_folders", short: "Folders", group: "Add" },
+  { key: "can_move", short: "Move", group: "Organize" },
+  { key: "can_rename", short: "Rename", group: "Organize" },
+  { key: "can_delete", short: "Delete", group: "Organize" },
 ];
+const PERMISSION_GROUPS = [...new Set(PERMISSION_ORDER.map((permission) => permission.group))];
 
-function TabsTable(ctx: Ctx) {
-  const [path, select] = useSelectedLibrary(ctx);
-  const library = ctx.libraries[path];
+type TableRow = { key: string; path: string; name: string; label: string; avatar: string; library?: boolean };
+
+/**
+ * One row per (library, person) pair. `bulk` adds header buttons that switch a permission
+ * for every row that already has access; `grouped` splits the permission header into
+ * Watch / Add / Organize.
+ */
+function PermissionTable({ ctx, rows, first, bulk, grouped }: { ctx: Ctx; rows: TableRow[]; first: string; bulk?: boolean; grouped?: boolean }) {
   const describe = (key: PermissionKey) => ctx.permissions.find((permission) => permission.key === key);
+  const editable = rows.filter((row) => !ctx.isAdmin(row.name) && ctx.presetOf(ctx.memberOf(row.path, row.name)) !== "none");
+  const allOn = (key: PermissionKey) => editable.length > 0 && editable.every((row) => ctx.memberOf(row.path, row.name)?.[key]);
+  const toggleAll = (key: PermissionKey) => { const next = !allOn(key); editable.forEach((row) => ctx.setPermission(row.path, row.name, key, next)); };
+  const withAccess = rows.filter((row) => ctx.isAdmin(row.name) || ctx.presetOf(ctx.memberOf(row.path, row.name)) !== "none").length;
+  return <div className="lib-tabs-scroll"><table className="lib-tabs-table">
+    <thead>
+      <tr><th rowSpan={2} className="lib-tabs-person">{first} <small>{withAccess} with access</small></th><th rowSpan={2}>Access</th>
+        {grouped ? PERMISSION_GROUPS.map((group) => <th key={group} colSpan={PERMISSION_ORDER.filter((permission) => permission.group === group).length} className="lib-tabs-group">{group}</th>)
+          : <th colSpan={PERMISSION_ORDER.length} className="lib-tabs-group">Permissions</th>}
+      </tr>
+      <tr>{PERMISSION_ORDER.map((permission) => <th key={permission.key} title={describe(permission.key)?.description}>
+        {bulk ? <button type="button" className={`lib-tabs-bulk${allOn(permission.key) ? " on" : ""}`} disabled={!editable.length} aria-label={`${allOn(permission.key) ? "Turn off" : "Turn on"} ${describe(permission.key)?.label ?? permission.short} for everyone with access`} onClick={() => toggleAll(permission.key)}>{permission.short}</button> : permission.short}
+      </th>)}</tr>
+    </thead>
+    <tbody>{rows.map((row) => {
+      const member = ctx.memberOf(row.path, row.name);
+      const admin = ctx.isAdmin(row.name);
+      const preset = ctx.presetOf(member);
+      return <tr key={row.key} className={admin ? "is-admin" : preset === "none" ? "is-none" : undefined}>
+        <th scope="row" className="lib-tabs-person"><span className="lib-opt-person-cell"><span className={`lib-opt-avatar${row.library ? " is-library" : ""}`} aria-hidden="true">{row.avatar}</span><span><b>{row.label}</b><small>{admin ? "Administrator" : ctx.presetLabel(preset)}</small></span></span></th>
+        {admin ? <td colSpan={PERMISSION_ORDER.length + 1} className="lib-tabs-note">Full access to every library</td> : <>
+          <td><PresetSelect ctx={ctx} path={row.path} name={row.name} /></td>
+          {preset === "none" ? <td colSpan={PERMISSION_ORDER.length} className="lib-tabs-note">No access</td>
+            : PERMISSION_ORDER.map((permission) => {
+              const on = Boolean(member?.[permission.key]);
+              const label = describe(permission.key)?.label ?? permission.short;
+              return <td key={permission.key}><button type="button" className={`lib-tabs-toggle${on ? " on" : ""}`} aria-pressed={on} aria-label={`${row.name}: ${label} in ${row.path}`} title={label} onClick={() => ctx.setPermission(row.path, row.name, permission.key, !on)}>{on ? "✓" : ""}</button></td>;
+            })}
+        </>}
+      </tr>;
+    })}</tbody>
+  </table></div>;
+}
+
+const peopleRows = (ctx: Ctx, path: string): TableRow[] => ctx.names.map((name) => ({ key: name, path, name, label: name, avatar: name.slice(0, 2).toUpperCase() }));
+
+function LibraryTabs({ ctx, path, onSelect }: { ctx: Ctx; path: string; onSelect: (path: string) => void }) {
+  return <nav className="lib-tabs-bar" role="tablist" aria-label="Libraries">{ctx.paths.map((candidate) => <button key={candidate} type="button" role="tab" aria-selected={candidate === path} className={candidate === path ? "active" : undefined} onClick={() => onSelect(candidate)}>
+    <b>{candidate}</b><small>{ctx.typeLabel(ctx.libraries[candidate].content_type)} · {ctx.libraries[candidate].members.length}</small>
+  </button>)}</nav>;
+}
+
+function PanelHeader({ ctx, path }: { ctx: Ctx; path: string }) {
+  return <header>
+    <h2><button type="button" className="lib-opt-title" onClick={() => openLibrary(path)}>{path}</button></h2>
+    {ctx.status(path) && <span role="status">{ctx.status(path)}</span>}
+    <LibrarySettings ctx={ctx} path={path} />
+  </header>;
+}
+
+/* Option 2: the library list from option 1 beside the permission table. */
+function ListTable(ctx: Ctx) {
+  const [path, select] = useSelectedLibrary(ctx);
+  return <div className="lib-opt-split">
+    <LibraryIndex ctx={ctx} path={path} onSelect={select} rich />
+    <article className="admin-surface lib-tabs-panel is-rounded"><PanelHeader ctx={ctx} path={path} /><PermissionTable ctx={ctx} rows={peopleRows(ctx, path)} first="Person" /></article>
+  </div>;
+}
+
+/* Option 3: every library on one page, each with its own table; jump links on top. */
+function StackedTables(ctx: Ctx) {
+  return <div className="lib-stack">
+    <nav className="lib-stack-jump" aria-label="Jump to library">{ctx.paths.map((path) => <a key={path} href={`#library-${encodeURIComponent(path)}`} onClick={(event) => { event.preventDefault(); document.getElementById(`library-${encodeURIComponent(path)}`)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>{path}</a>)}</nav>
+    {ctx.paths.map((path) => <article key={path} id={`library-${encodeURIComponent(path)}`} className="admin-surface lib-tabs-panel is-rounded"><PanelHeader ctx={ctx} path={path} /><PermissionTable ctx={ctx} rows={peopleRows(ctx, path)} first="Person" /></article>)}
+  </div>;
+}
+
+/* Option 4: tabs for people instead of libraries; each row is a library. */
+function PersonTabs(ctx: Ctx) {
+  const [person, setPerson] = useState(() => ctx.names.find((name) => !ctx.isAdmin(name)) ?? ctx.names[0] ?? "");
+  const rows: TableRow[] = ctx.paths.map((path) => ({ key: path, path, name: person, label: path, avatar: "▣", library: true }));
   return <div className="lib-tabs">
-    <nav className="lib-tabs-bar" role="tablist" aria-label="Libraries">{ctx.paths.map((candidate) => {
-      const item = ctx.libraries[candidate];
-      return <button key={candidate} type="button" role="tab" aria-selected={candidate === path} className={candidate === path ? "active" : undefined} onClick={() => select(candidate)}>
-        <b>{candidate}</b><small>{ctx.typeLabel(item.content_type)} · {item.members.length}</small>
+    <nav className="lib-tabs-bar" role="tablist" aria-label="People">{ctx.names.map((name) => {
+      const count = ctx.isAdmin(name) ? ctx.paths.length : ctx.paths.filter((path) => ctx.memberOf(path, name)?.can_view).length;
+      return <button key={name} type="button" role="tab" aria-selected={name === person} className={name === person ? "active" : undefined} onClick={() => setPerson(name)}>
+        <b>{name}</b><small>{ctx.isAdmin(name) ? "Administrator" : `${count} of ${ctx.paths.length} libraries`}</small>
       </button>;
     })}</nav>
+    <article className="admin-surface lib-tabs-panel" role="tabpanel" aria-label={person}>
+      {person && <PermissionTable ctx={ctx} rows={rows} first="Library" />}
+      <details className="lib-tabs-settings"><summary>Library settings</summary>{ctx.paths.map((path) => <div key={path} className="lib-tabs-settings-row"><b>{path}</b>{ctx.status(path) && <small role="status">{ctx.status(path)}</small>}<LibrarySettings ctx={ctx} path={path} /></div>)}</details>
+    </article>
+  </div>;
+}
+
+/* Option 5: library tabs with grouped permissions and header buttons that set a permission for everyone. */
+function BulkTable(ctx: Ctx) {
+  const [path, select] = useSelectedLibrary(ctx);
+  return <div className="lib-tabs">
+    <LibraryTabs ctx={ctx} path={path} onSelect={select} />
     <article className="admin-surface lib-tabs-panel" role="tabpanel" aria-label={path}>
-      <header>
-        <h2><button type="button" className="lib-opt-title" onClick={() => openLibrary(path)}>{path}</button></h2>
-        {ctx.status(path) && <span role="status">{ctx.status(path)}</span>}
-        <LibrarySettings ctx={ctx} path={path} />
-      </header>
-      <div className="lib-tabs-scroll"><table className="lib-tabs-table">
-        <thead>
-          <tr><th rowSpan={2} className="lib-tabs-person">Person <small>{library.members.length} with access</small></th><th rowSpan={2}>Access</th><th colSpan={PERMISSION_ORDER.length} className="lib-tabs-group">Permissions</th></tr>
-          <tr>{PERMISSION_ORDER.map((permission) => <th key={permission.key} title={describe(permission.key)?.description}>{permission.short}</th>)}</tr>
-        </thead>
-        <tbody>{ctx.names.map((name) => {
-          const member = ctx.memberOf(path, name);
-          const admin = ctx.isAdmin(name);
-          const preset = ctx.presetOf(member);
-          return <tr key={name} className={admin ? "is-admin" : preset === "none" ? "is-none" : undefined}>
-            <th scope="row" className="lib-tabs-person"><span className="lib-opt-person-cell"><Avatar name={name} /><span><b>{name}</b><small>{admin ? "Administrator" : ctx.presetLabel(preset)}</small></span></span></th>
-            {admin ? <td colSpan={PERMISSION_ORDER.length + 1} className="lib-tabs-note">Full access to every library</td> : <>
-              <td><PresetSelect ctx={ctx} path={path} name={name} /></td>
-              {preset === "none" ? <td colSpan={PERMISSION_ORDER.length} className="lib-tabs-note">No access</td>
-                : PERMISSION_ORDER.map((permission) => {
-                  const on = Boolean(member?.[permission.key]);
-                  const label = describe(permission.key)?.label ?? permission.short;
-                  return <td key={permission.key}><button type="button" className={`lib-tabs-toggle${on ? " on" : ""}`} aria-pressed={on} aria-label={`${name}: ${label} in ${path}`} title={label} onClick={() => ctx.setPermission(path, name, permission.key, !on)}>{on ? "✓" : ""}</button></td>;
-                })}
-            </>}
-          </tr>;
-        })}</tbody>
-      </table></div>
+      <PanelHeader ctx={ctx} path={path} />
+      <PermissionTable ctx={ctx} rows={peopleRows(ctx, path)} first="Person" bulk grouped />
     </article>
   </div>;
 }
