@@ -170,6 +170,18 @@ const LEGACY_LIBRARY_CACHE_KEY = "framebox:library-cache:v6";
 // matching policy. Bump alongside a meaningful matcher change.
 const TITLE_METADATA_MATCH_VERSION = 9;
 const NEW_ITEMS_WINDOW_SECONDS = 24 * 60 * 60;
+// A movie folder often holds the film plus samples and release notes; New
+// shows each movie once, using its largest file.
+const newestPerMovie = (items: MediaItem[]) => {
+  const movies = new Map<string, MediaItem>();
+  for (const item of items) {
+    if (item.catalogKind !== "movie" || !item.catalogTitlePath) continue;
+    const current = movies.get(item.catalogTitlePath);
+    const rank = (candidate: MediaItem) => [candidate.kind === "video" ? 1 : 0, candidate.sizeBytes ?? 0];
+    if (!current || rank(item)[0] > rank(current)[0] || (rank(item)[0] === rank(current)[0] && rank(item)[1] > rank(current)[1])) movies.set(item.catalogTitlePath, item);
+  }
+  return items.filter((item) => item.catalogKind !== "movie" || !item.catalogTitlePath || movies.get(item.catalogTitlePath) === item);
+};
 const titleMetadataKey = (path: string, kind: string) => `${path}::${kind}::v${TITLE_METADATA_MATCH_VERSION}`;
 const PLAYBACK_QUEUE_KEY = "tms:playback-queue:v1";
 const LEGACY_PLAYBACK_QUEUE_KEY = "framebox:playback-queue:v1";
@@ -2851,7 +2863,7 @@ export default function Home() {
   const visible = useMemo(() => {
     let next: MediaItem[];
     if (section === "recent") next = items.filter((item) => !item.trashed && item.kind !== "folder" && item.lastOpenedAt);
-    else if (section === "new") next = items.filter((item) => !item.trashed && item.kind !== "folder" && (item.addedAt ?? 0) >= (Date.now() / 1000) - NEW_ITEMS_WINDOW_SECONDS);
+    else if (section === "new") next = newestPerMovie(items.filter((item) => !item.trashed && item.kind !== "folder" && (item.addedAt ?? 0) >= (Date.now() / 1000) - NEW_ITEMS_WINDOW_SECONDS));
     else if (section === "favorites") next = items.filter((item) => !item.trashed && item.favorite);
     else if (section === "playlists") {
       const paths = new Set(activePlaylistId ? playlists[activePlaylistId]?.paths ?? [] : []);
