@@ -5,7 +5,7 @@ import { useAppConfirm } from "../AppConfirmProvider";
 import { API_BASE } from "../lib/media";
 import { authFetch, canAccessAdminPanel, clearSession, emptyAdminPermissions, getSessionUser, hasAdminPermission, logOut, reportClientPerformance, type AdminPermissions } from "../lib/auth";
 import type { YtDlpJob } from "../ServerDownloadDialog";
-import { isActiveWork, isFinishedWork, needsWorkAttention, workProgress, workTitle } from "../lib/running-work";
+import { isActiveWork, isFinishedWork, needsWorkAttention, showWork, workTitle } from "../lib/running-work";
 import MenuIcon from "../MenuIcon";
 import AdminTrash from "./Trash";
 import LibrariesOptions, { LibrariesLayoutPicker, useLibrariesLayout } from "./LibrariesOptions";
@@ -1541,15 +1541,13 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
           {(processRefreshError || (processUpdatedAt !== null && processClock - processUpdatedAt > 15_000)) && <div className="admin-work-feedback" aria-live="polite">
             <strong role="status">{processRefreshError || "Live status is delayed"}. Displayed work may be outdated.</strong>
           </div>}
-          {loading ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading running work</b></div> : processes.some((process) => showFinishedWork || !isFinishedWork(process.status) || needsWorkAttention(process.status)) ? <div className="admin-process-list">{processes.filter((process) => showFinishedWork || !isFinishedWork(process.status) || needsWorkAttention(process.status)).map((process) => {
+          {loading ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading running work</b></div> : processes.some((process) => showWork(process.id, process.status, showFinishedWork)) ? <div className="admin-process-list">{processes.filter((process) => showWork(process.id, process.status, showFinishedWork)).map((process) => {
             const isYtDlp = process.id.startsWith("ytdlp:");
             const isFailed = needsWorkAttention(process.status);
             const isLive = isActiveWork(process.status);
             const isScanning = process.status === "scanning library";
-            const progress = workProgress(process.status, process.progress);
-            const detail = isScanning && process.id.startsWith("browser-media:")
-              ? "Scanning library for incompatible audio"
-              : process.detail;
+            const progress = process.progress;
+            const detail = process.detail;
             const isComplete = isFinishedWork(process.status);
             const statusIndicator = isFailed ? "failed" : isLive ? "live" : isComplete ? "complete" : "queued";
             const progressEta = isLive && !isScanning && !process.eta && process.eta_seconds == null

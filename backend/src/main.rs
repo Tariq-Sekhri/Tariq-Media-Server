@@ -223,6 +223,8 @@ struct ActiveBrowserMedia {
     completed_files: usize,
     total_files: usize,
     inventory_complete: bool,
+    scanned_files: usize,
+    scan_total: usize,
     paused_until: Option<u64>,
     max_speed: bool,
 }
@@ -3168,7 +3170,7 @@ async fn admin_processes(
             .paused_until
             .is_some_and(|until| until > unix_now());
         let progress = if !browser_media.inventory_complete {
-            0.0
+            if browser_media.scan_total == 0 { 0.0 } else { browser_media.scanned_files as f64 / browser_media.scan_total as f64 }
         } else if browser_media.total_files == 0 {
             1.0
         } else {
@@ -3185,6 +3187,8 @@ async fn admin_processes(
                 .unwrap_or_else(|| library.clone()),
             detail: if is_paused {
                 format!("Library {library} · paused")
+            } else if !browser_media.inventory_complete {
+                format!("Library {library} · checking audio compatibility · {} / {} files scanned", browser_media.scanned_files, browser_media.scan_total)
             } else if is_running {
                 format!(
                     "Library {library} · {} AAC remux",
@@ -3219,6 +3223,25 @@ async fn admin_processes(
             } else {
                 vec!["stop".to_owned(), "max".to_owned()]
             },
+        });
+    }
+
+    for (library, finished) in state.finished_browser_media_libraries.lock().await.iter() {
+        processes.push(AdminProcess {
+            id: format!("browser-media-finished:{library}"),
+            kind: "Browser audio remux".to_owned(),
+            status: if finished.failed_files > 0 { "finished with errors" } else { "complete" }.to_owned(),
+            title: library.clone(),
+            detail: format!("Library {library} · {} · {} already cached · {} remuxed · {} failed",
+                if finished.failed_files > 0 { "Remux incomplete" } else { "Ready for playback" },
+                finished.total_files.saturating_sub(finished.generated_files + finished.failed_files),
+                finished.generated_files, finished.failed_files),
+            progress: Some(preview_completion(finished.total_files, finished.failed_files)),
+            started_at: finished.started_at,
+            user_name: finished.initiated_by.clone(),
+            pid: None, eta: None, eta_seconds: None, avg_item_seconds: None,
+            current_item: None, destination_path: None, speed: None, error: None,
+            paused_until: None, transfer: None, actions: Vec::new(),
         });
     }
 
@@ -13211,6 +13234,8 @@ fn schedule_browser_media_library(state: AppState, library: String) {
                     completed_files: 0,
                     total_files: 0,
                     inventory_complete: false,
+                    scanned_files: 0,
+                    scan_total: 0,
                     paused_until: None,
                     max_speed: false,
                 },
@@ -13222,7 +13247,7 @@ fn schedule_browser_media_library(state: AppState, library: String) {
             .await
             .remove(&library);
 
-        let (files, mut completed_files, total_files) =
+        let (files, mut completed_files, total_files, inventory_failures) =
             browser_media_inventory(&state, &library).await;
         {
             let mut active = state.active_browser_media_libraries.lock().await;
@@ -13233,7 +13258,7 @@ fn schedule_browser_media_library(state: AppState, library: String) {
             }
         }
         let mut generated_files = 0;
-        let mut failed_files = 0;
+        let mut failed_files = inventory_failures;
         if files.is_empty() {
             finish_browser_media_run(
                 &state,
@@ -13313,6 +13338,7 @@ fn schedule_browser_media_library(state: AppState, library: String) {
 }
 
 async fn finish_browser_media_run(state: &AppState, library: &str, finished: FinishedBrowserMedia) {
+    tracing::info!(library, total = finished.total_files, generated = finished.generated_files, failed = finished.failed_files, "Browser audio preparation finished");
     state
         .finished_browser_media_libraries
         .lock()
@@ -13325,11 +13351,14 @@ async fn finish_browser_media_run(state: &AppState, library: &str, finished: Fin
         .remove(library);
 }
 
-async fn browser_media_inventory(state: &AppState, library: &str) -> (Vec<PathBuf>, usize, usize) {
+async fn browser_media_inventory(state: &AppState, library: &str) -> (Vec<PathBuf>, usize, usize, usize) {
     let root = state.library_root.join(library);
     let library_root = state.library_root.clone();
     let browser_media_dir = state.browser_media_dir.clone();
     let ffprobe_path = state.ffprobe_path.clone();
+    let active = state.active_browser_media_libraries.clone();
+    let library = library.to_owned();
+    let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
         let files = walkdir::WalkDir::new(root)
             .follow_links(true)
@@ -13343,20 +13372,46 @@ async fn browser_media_inventory(state: &AppState, library: &str) -> (Vec<PathBu
                     .map(|value| is_browser_media_video_extension(&value.to_lowercase()))
                     .unwrap_or(false)
             })
-            .filter(|path| file_needs_browser_media_remux(&ffprobe_path, path))
             .collect::<Vec<_>>();
-        let total = files.len();
-        let (complete, pending): (Vec<_>, Vec<_>) = files.into_iter().partition(|path| {
-            let Ok(relative) = path.strip_prefix(&library_root) else {
-                return false;
-            };
-            let Ok(metadata) = path.metadata() else {
-                return false;
-            };
-            let key = browser_media_cache_key(&relative.to_string_lossy().replace('\\', "/"), &metadata);
-            browser_media_is_complete(&browser_media_dir, &key)
+        runtime.block_on(async {
+            if let Some(work) = active.lock().await.get_mut(&library) {
+                work.scan_total = files.len();
+            }
         });
-        (pending, complete.len(), total)
+        tracing::info!(library, files = files.len(), "Scanning browser audio compatibility");
+        let mut pending = Vec::new();
+        let mut complete = 0;
+        let mut failed = 0;
+        for (index, path) in files.into_iter().enumerate() {
+            if let (Ok(relative), Ok(metadata)) = (path.strip_prefix(&library_root), path.metadata()) {
+                let key = browser_media_cache_key(&relative.to_string_lossy().replace('\\', "/"), &metadata);
+                let compatible = browser_media_dir.join(format!("{key}.compatible"));
+                if browser_media_is_complete(&browser_media_dir, &key) {
+                    complete += 1;
+                } else if !compatible.is_file() {
+                    let (video, audio) = probe_primary_stream_codecs(&ffprobe_path, &path);
+                    if audio.as_deref().is_some_and(|codec| !audio_codec_is_browser_compatible(codec))
+                        && video.as_deref().is_some_and(video_codec_is_remux_safe) {
+                        pending.push(path);
+                    } else if video.is_some() && audio.is_some() {
+                        // Cache only successful probes. The key changes when the source changes.
+                        let _ = std::fs::create_dir_all(&browser_media_dir);
+                        let _ = std::fs::write(compatible, b"compatible");
+                    } else if video.is_none() {
+                        failed += 1;
+                    }
+                }
+            } else {
+                failed += 1;
+            }
+            runtime.block_on(async {
+                if let Some(work) = active.lock().await.get_mut(&library) {
+                    work.scanned_files = index + 1;
+                }
+            });
+        }
+        let total = complete + pending.len() + failed;
+        (pending, complete, total, failed)
     })
     .await
     .unwrap_or_default()
@@ -19441,6 +19496,27 @@ mod tests {
         assert_eq!(preview_completion(0, 0), 1.0);
         assert_eq!(preview_completion(10, 2), 0.8);
         assert_eq!(preview_completion(10, 0), 1.0);
+    }
+
+    #[test]
+    fn browser_audio_completion_requires_finished_output_and_matches_source_version() {
+        let root = std::env::temp_dir().join(format!("tms-audio-progress-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let input = root.join("source.mp4");
+        std::fs::write(&input, b"source").unwrap();
+        let key = browser_media_cache_key("Library/source.mp4", &input.metadata().unwrap());
+        let (output, partial, marker) = browser_media_paths(&root, &key);
+        std::fs::write(&partial, b"partial").unwrap();
+        assert!(!browser_media_is_complete(&root, &key));
+        std::fs::write(&output, b"finished").unwrap();
+        assert!(!browser_media_is_complete(&root, &key));
+        std::fs::write(&marker, b"complete").unwrap();
+        assert!(browser_media_is_complete(&root, &key));
+        std::fs::write(&input, b"changed source").unwrap();
+        let changed_key = browser_media_cache_key("Library/source.mp4", &input.metadata().unwrap());
+        assert_ne!(key, changed_key);
+        assert!(!browser_media_is_complete(&root, &changed_key));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[cfg(windows)]
