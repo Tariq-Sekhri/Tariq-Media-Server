@@ -7348,8 +7348,9 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 @media (prefers-reduced-motion: reduce) { .admin-loading-arc { animation: none; } }
 
 /* Compact quota usage stays with each account in Users. */
-.admin-user-identity .admin-user-storage { width: 200px; max-width: 100%; gap: 3px; }
-.admin-user-storage progress { appearance: none; display: block; width: 100%; height: 4px; margin-top: 3px; overflow: hidden; border: 0; border-radius: 999px; background: #292e37; color: #a38ce8; accent-color: #a38ce8; }
+.admin-user-identity .admin-user-storage { width: max-content; max-width: 100%; gap: 3px; }
+.admin-user-storage small { white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
+.admin-user-storage progress { appearance: none; display: block; width: 200px; max-width: 100%; height: 4px; margin-top: 3px; overflow: hidden; border: 0; border-radius: 999px; background: #292e37; color: #a38ce8; accent-color: #a38ce8; }
 .admin-user-storage progress::-webkit-progress-bar { border-radius: 999px; background: #292e37; }
 .admin-user-storage progress::-webkit-progress-value { border-radius: 999px; background: #a38ce8; }
 .admin-user-storage progress::-moz-progress-bar { border-radius: 999px; background: #a38ce8; }
