@@ -7074,3 +7074,78 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
  .discover-title-dialog .discover-card { min-width: 0; }
  .discover-title-dialog .discover-card b { display: block; max-width: 100%; overflow-wrap: anywhere; }
 }
+
+/* Settings: compact section navigation and consistently aligned controls. */
+.unified-layout .profile-settings-modal.settings-dialog { display: flex; flex-direction: column; width: min(760px, calc(100vw - 32px)); max-width: none; height: min(660px, calc(100dvh - 48px)); max-height: calc(100dvh - 48px); padding: 0; overflow: hidden; border: 1px solid #343b46; border-radius: 16px; background: #10141a; color: #e0e5eb; text-align: left; box-shadow: 0 24px 90px #0009; }
+.unified-layout .profile-settings-modal.settings-dialog:focus { outline: none; }
+.unified-layout .settings-dialog .profile-settings-header { position: static; display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; margin: 0; padding: 20px 24px 16px; border: 0; background: transparent; }
+.unified-layout .settings-dialog .profile-settings-header h2 { margin: 0; font-family: inherit; font-weight: 650; font-size: 24px; line-height: 1.2; letter-spacing: -.5px; color: #f0f2f6; }
+.unified-layout .settings-dialog .profile-settings-header > button { display: grid; place-items: center; width: 36px; min-width: 36px; height: 36px; min-height: 36px; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #a9b1bf; }
+.unified-layout .settings-dialog .profile-settings-header > button:hover { background: #242a35; color: #fff; }
+.unified-layout .settings-dialog .profile-settings-header .menu-icon { width: 20px; height: 20px; margin: 0; }
+.unified-layout .settings-dialog .settings-navigation { display: flex; flex: 0 0 auto; gap: 6px; margin: 0; padding: 0 24px 12px; border-bottom: 1px solid #2b323e; overflow-x: auto; }
+.unified-layout .settings-dialog .settings-navigation button { flex: 1; min-height: 40px; border: 1px solid transparent; border-radius: 8px; padding: 8px 12px; background: transparent; color: #aeb7c5; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.unified-layout .settings-dialog .settings-navigation button:hover { background: #1e2530; color: #edf0f8; }
+.unified-layout .settings-dialog .settings-navigation button[aria-pressed=true] { border-color: #61517e; background: #30283f; color: #e2d7ff; }
+.unified-layout .settings-dialog .settings-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px; scrollbar-color: #454d5b transparent; scrollbar-width: thin; }
+.unified-layout .settings-dialog .settings-panel { display: flex; flex-direction: column; gap: 24px; margin: 0; min-width: 0; }
+.unified-layout .settings-dialog .settings-panel[hidden] { display: none !important; }
+.unified-layout .settings-dialog :is(p, small, label, input, select, button) { font-family: inherit; }
+.unified-layout .settings-dialog :is(p, small) { font-size: 13px; line-height: 1.5; color: #a5afbd; }
+.unified-layout .settings-dialog small { display: block; }
+.unified-layout .settings-dialog .profile-settings-section-heading b, .unified-layout .settings-dialog .profile-library-playback legend { font-size: 16px; line-height: 1.4; font-weight: 650; color: #e9edf4; }
+.unified-layout .settings-dialog .profile-library-playback { display: block; margin: 0; padding: 0; width: 100%; min-width: 0; border: 0; }
+.unified-layout .settings-dialog .profile-library-playback legend { padding: 0; margin: 0 0 4px; }
+.unified-layout .settings-dialog .settings-device-note { margin: 0 0 18px; }
+.unified-layout .settings-dialog :is(.settings-library-columns, .profile-library-playback-row) { display: grid; grid-template-columns: minmax(0, 1fr) 150px; align-items: center; gap: 12px; width: 100%; }
+.unified-layout .settings-dialog :is(.settings-library-columns, .profile-library-playback-row).has-alongside { grid-template-columns: minmax(0, 1fr) 140px 120px; }
+.unified-layout .settings-dialog .settings-library-columns { padding: 0 12px 8px; box-sizing: border-box; color: #98a3b4; font-size: 12px; line-height: 1.4; }
+.unified-layout .settings-dialog .settings-library-columns > span:not(:first-child) { text-align: center; }
+.unified-layout .settings-dialog .profile-library-playback-row { min-height: 52px; padding: 0 12px; box-sizing: border-box; border-top: 1px solid #28303b; }
+.unified-layout .settings-dialog .profile-library-playback-row:nth-child(even) { background: #141a22; }
+.unified-layout .settings-dialog .profile-library-playback-row > b { min-width: 0; overflow-wrap: anywhere; color: #dce2ed; font-size: 14px; line-height: 1.4; font-weight: 500; }
+.unified-layout .settings-dialog .settings-library-toggle { display: flex; align-items: center; justify-content: center; min-height: 48px; margin: 0; padding: 0; cursor: pointer; }
+.unified-layout .profile-settings-modal.settings-dialog :is(.settings-library-toggle, .profile-device-path-option) input[type=checkbox] { position: relative; appearance: none; flex: 0 0 40px; width: 40px !important; min-width: 40px; height: 24px !important; min-height: 24px !important; margin: 0; padding: 0; border: 1px solid #4b5463; border-radius: 20px; background: #303846; box-shadow: none; cursor: pointer; transition: background .15s; }
+.unified-layout .profile-settings-modal.settings-dialog :is(.settings-library-toggle, .profile-device-path-option) input[type=checkbox]:checked { border-color: #a38ce8; background: #8770d7; }
+.unified-layout .profile-settings-modal.settings-dialog :is(.settings-library-toggle, .profile-device-path-option) input[type=checkbox]::before { display: none; }
+.unified-layout .profile-settings-modal.settings-dialog :is(.settings-library-toggle, .profile-device-path-option) input[type=checkbox]::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #e8edf5; transform: none; transition: left .15s; }
+.unified-layout .profile-settings-modal.settings-dialog :is(.settings-library-toggle, .profile-device-path-option) input[type=checkbox]:checked::after { left: 19px; }
+.unified-layout .settings-dialog :is(button, input, select, summary):focus-visible { outline: 2px solid #b6a3ff; outline-offset: 3px; }
+.unified-layout .settings-dialog .profile-playback-option { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 16px; margin: 0; padding: 18px 0 0; border-top: 1px solid #2b323e; text-align: left; }
+.unified-layout .settings-dialog .profile-playback-option > span { font-size: 14px; font-weight: 550; color: #e0e5ed; }
+.unified-layout .settings-dialog .profile-playback-option > small { grid-column: 1 / -1; margin: 0; }
+.unified-layout .settings-dialog :is(.profile-password-fields input, .watch-image-duration-select, .watch-image-duration-custom) { min-height: 40px; padding: 9px 12px; border: 1px solid #3c4553; border-radius: 8px; background: #171e27; color: #e2e8f0; font-size: 14px; }
+.unified-layout .settings-dialog :is(.profile-offline-location > button, .profile-password-form button) { min-height: 40px; padding: 9px 14px; border: 1px solid #514568; border-radius: 8px; background: #30283f; color: #e5ddfa; font-size: 14px; font-weight: 600; cursor: pointer; }
+.unified-layout .settings-dialog :is(.profile-storage-usage, .profile-device-sessions, .profile-password-form) { margin: 0; padding: 0; border: 0; }
+.unified-layout .settings-dialog .profile-storage-usage { display: flex; flex-direction: column; gap: 12px; }
+.unified-layout .settings-dialog .profile-storage-unlimited { margin: 0; padding: 16px; border: 1px solid #303946; border-radius: 10px; background: #171e27; }
+.unified-layout .settings-dialog .profile-storage-unlimited strong { font-size: 22px; font-weight: 650; color: #e9edf5; }
+.unified-layout .settings-dialog .profile-device-path-option { align-self: stretch; display: flex !important; align-items: center; gap: 12px; min-height: 44px; }
+.unified-layout .settings-dialog .profile-device-path-option span { font-size: 14px; font-weight: 500; line-height: 1.5; }
+.unified-layout .settings-dialog .profile-advanced { margin: 0; padding: 16px 0 0; border-top: 1px solid #2b323e; }
+.unified-layout .settings-dialog .profile-advanced summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 36px; color: #c9c2df; font-size: 14px; cursor: pointer; list-style: none; }
+.unified-layout .settings-dialog .profile-advanced summary::-webkit-details-marker { display: none; }
+.unified-layout .settings-dialog .profile-advanced[open] summary { margin-bottom: 12px; }
+.unified-layout .settings-dialog .profile-device-sessions { display: flex; flex-direction: column; gap: 12px; }
+.unified-layout .settings-dialog .profile-device-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; margin: 0; padding: 14px; border: 1px solid #2e3743; border-radius: 10px; background: #151b23; }
+.unified-layout .settings-dialog .profile-device-row b { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; line-height: 1.4; font-weight: 600; color: #e0e6ee; }
+.unified-layout .settings-dialog .profile-device-row small { margin-top: 4px; overflow-wrap: anywhere; }
+.unified-layout .settings-dialog .profile-device-row em { padding: 2px 6px; border-radius: 5px; background: #263b34; color: #a0d4bc; font-size: 11px; font-style: normal; }
+.unified-layout .settings-dialog .profile-device-row button { min-height: 36px; padding: 8px 12px; border: 1px solid #68414a; border-radius: 7px; background: transparent; color: #f0a0a6; font-size: 13px; cursor: pointer; }
+.unified-layout .settings-dialog .profile-password-fields { gap: 16px; margin-top: 20px; }
+.unified-layout .settings-dialog .profile-password-fields label { gap: 8px; font-size: 14px; color: #c9d1dc; }
+.unified-layout .settings-dialog .profile-password-note { font-weight: 400; }
+.unified-layout .settings-dialog .profile-password-form .folder-create-actions { margin-top: 20px; }
+@media (max-width: 760px) {
+ .unified-layout .profile-settings-modal.settings-dialog { width: calc(100vw - 16px); height: min(740px, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); border-radius: 14px; }
+ .unified-layout .settings-dialog .profile-settings-header { padding: 16px 16px 12px; }
+ .unified-layout .settings-dialog .settings-navigation { padding: 0 12px 12px; gap: 2px; }
+ .unified-layout .settings-dialog .settings-navigation button { min-height: 44px; padding: 8px; font-size: 13px; }
+ .unified-layout .settings-dialog .settings-body { padding: 18px 16px; }
+ .unified-layout .settings-dialog :is(.settings-library-columns, .profile-library-playback-row) { grid-template-columns: minmax(0,1fr) 112px; padding-inline: 6px; gap: 8px; }
+ .unified-layout .settings-dialog :is(.settings-library-columns, .profile-library-playback-row).has-alongside { grid-template-columns: minmax(0,1fr) 90px 76px; }
+ .unified-layout .settings-dialog .profile-library-playback-row > b { font-size: 14px; }
+ .unified-layout .settings-dialog .profile-password-fields { grid-template-columns: 1fr; }
+ .unified-layout .settings-dialog .profile-device-row { padding: 12px; gap: 10px; }
+ .unified-layout .settings-dialog .profile-settings-header > button { min-width: 44px; min-height: 44px; }
+}

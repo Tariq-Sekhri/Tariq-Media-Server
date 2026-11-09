@@ -1394,6 +1394,8 @@ export default function Home() {
   const [draggedItem, setDraggedItem] = useState<MediaItem | null>(null);
   const [dragTarget, setDragTarget] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsBodyRef = useRef<HTMLDivElement>(null);
+  const [settingsView, setSettingsView] = useState<"playback" | "downloads" | "account" | "devices">("playback");
   const [folderToolsOpen, setFolderToolsOpen] = useState(false);
   useBackLayer(folderToolsOpen, () => setFolderToolsOpen(false));
   useEffect(() => {
@@ -9357,15 +9359,78 @@ export default function Home() {
               setSettingsOpen(false);
           }}
         >
-          <div className="folder-create-modal profile-settings-modal" role="dialog" aria-modal="true" aria-labelledby="profile-settings-title">
+          <div className="folder-create-modal profile-settings-modal settings-dialog" role="dialog" aria-modal="true" aria-labelledby="profile-settings-title">
             <div className="profile-settings-header">
-              <div>
-                <p>USER SETTINGS</p>
-                <h2 id="profile-settings-title">Settings</h2>
-              </div>
-              <button type="button" aria-label="Close user settings" onClick={() => setSettingsOpen(false)}>×</button>
+              <h2 id="profile-settings-title">Settings</h2>
+              <button type="button" aria-label="Close settings" onClick={() => setSettingsOpen(false)}><MenuIcon name="close" /></button>
             </div>
-            <details className="profile-password-disclosure"><summary>Change password</summary><form className="profile-password-form" onSubmit={savePassword}>
+            <nav className="settings-navigation" aria-label="Settings sections">
+              {([['playback', 'Playback'], ['downloads', 'Downloads'], ['account', 'Account'], ['devices', 'Devices']] as const).map(([key, label]) => (
+                <button type="button" key={key} aria-pressed={settingsView === key} aria-controls={`settings-${key}`} onClick={() => { setSettingsView(key); settingsBodyRef.current?.scrollTo({ top: 0 }); }}>{label}</button>
+              ))}
+            </nav>
+            <div className="settings-body" ref={settingsBodyRef}>
+            <section id="settings-playback" className="settings-panel" aria-label="Playback" hidden={settingsView !== "playback"}>
+              <LibraryPlaybackSettings libraries={Object.keys(libraries)} displayName={libraryDisplayName} />
+              <label className="profile-playback-option">
+                <span>Time per image</span>
+                <ImageDurationControl idPrefix="profile-image-seconds" value={playbackPreferences.image_seconds} disabled={savingImageSeconds} onChange={(seconds) => void saveImageSeconds(seconds)} />
+                <small>Seconds each image stays on screen during a slideshow.</small>
+              </label>
+            </section>
+            <section id="settings-downloads" className="settings-panel" aria-label="Downloads" hidden={settingsView !== "downloads"}>
+              <section className="profile-storage-usage">
+              <div className="profile-settings-section-heading"><b>Storage</b></div>
+              {storageQuota ? storageQuota.unlimited || !storageQuota.storage_quota_bytes ? (
+                <p className="profile-storage-unlimited"><strong>{formatUploadSize(storageQuota.used_bytes)}</strong> used · Unlimited storage</p>
+              ) : (
+                <>
+                  <div className="profile-storage-summary"><strong>{formatUploadSize(storageQuota.used_bytes)}</strong><span>used of {formatUploadSize(storageQuota.storage_quota_bytes ?? 0)}</span><em>{formatUploadSize(storageQuota.available_bytes ?? 0)} free</em></div>
+                  <progress max={Math.max(1, storageQuota.storage_quota_bytes ?? 1)} value={Math.min(storageQuota.storage_quota_bytes ?? 0, storageQuota.used_bytes + storageQuota.reserved_bytes)} />
+                  {storageQuota.reserved_bytes > 0 && <small>{formatUploadSize(storageQuota.reserved_bytes)} reserved for active uploads or downloads.</small>}
+                </>
+              ) : <small>Loading storage usage…</small>}
+              <small>Storage is returned when you permanently delete an item from Trash.</small>
+            </section>
+              <div className="profile-playback-option profile-offline-location">
+                <span>Offline download folder</span>
+                <button
+                  type="button"
+                  onClick={() => void chooseOfflineDownloadLocation()}
+                  disabled={offlineBusy}
+                >
+                  {offlineBusy ? "Choosing…" : offlineLocationName ? "Change folder" : "Choose folder"}
+                </button>
+                <small>
+                  {offlineLocationName
+                    ? `Downloads on this device are saved in ${offlineLocationName}.`
+                    : "Choose where offline copies are saved on this device."}
+                </small>
+              </div>
+              <label className="profile-device-path-option">
+                <input
+                  type="checkbox"
+                  aria-label="Show ‘Copy device path’ in media menus" aria-checked={showDevicePath} checked={showDevicePath}
+                  onChange={(e) => {
+                    setShowDevicePath(e.target.checked);
+                    try { localStorage.setItem("framebox-show-device-path", String(e.target.checked)); } catch {}
+                  }}
+                />
+                <span>Show ‘Copy device path’ in media menus</span>
+              </label>
+              <details className="profile-advanced"><summary>Advanced library loading<MenuIcon name="chevronDown" /></summary>
+              <label className="profile-device-path-option">
+                <input
+                  type="checkbox"
+                  aria-label="Load every item in large folders" aria-checked={Boolean(playbackPreferences.load_all_items)} checked={playbackPreferences.load_all_items || false}
+                  onChange={(e) => void saveLoadAllItems(e.target.checked)}
+                />
+                <span>Load every item in large folders<small>Loads all items together; large folders use more memory and open more slowly.</small></span>
+              </label>
+              </details>
+            </section>
+            <section id="settings-account" className="settings-panel" aria-label="Account" hidden={settingsView !== "account"}>
+              <form className="profile-password-form" onSubmit={savePassword}>
               <div className="profile-settings-section-heading"><b>Change password</b></div>
               <div className="profile-password-fields">
               <label htmlFor="profile-current-password">
@@ -9409,65 +9474,9 @@ export default function Home() {
                   {savingPassword ? "Saving…" : "Change password"}
                 </button>
               </div>
-            </form></details>
-            <section className="profile-storage-usage">
-              <div className="profile-settings-section-heading"><b>Storage</b></div>
-              {storageQuota ? storageQuota.unlimited || !storageQuota.storage_quota_bytes ? (
-                <p className="profile-storage-unlimited"><strong>{formatUploadSize(storageQuota.used_bytes)}</strong> used · Unlimited storage</p>
-              ) : (
-                <>
-                  <div className="profile-storage-summary"><strong>{formatUploadSize(storageQuota.used_bytes)}</strong><span>used of {formatUploadSize(storageQuota.storage_quota_bytes ?? 0)}</span><em>{formatUploadSize(storageQuota.available_bytes ?? 0)} free</em></div>
-                  <progress max={Math.max(1, storageQuota.storage_quota_bytes ?? 1)} value={Math.min(storageQuota.storage_quota_bytes ?? 0, storageQuota.used_bytes + storageQuota.reserved_bytes)} />
-                  {storageQuota.reserved_bytes > 0 && <small>{formatUploadSize(storageQuota.reserved_bytes)} reserved for active uploads or downloads.</small>}
-                </>
-              ) : <small>Loading storage usage…</small>}
-              <small>Storage is returned when you permanently delete an item from Trash.</small>
+            </form>
             </section>
-            <section className="profile-preferences">
-              <div className="profile-settings-section-heading"><b>Preferences</b></div>
-              <LibraryPlaybackSettings libraries={Object.keys(libraries)} />
-              <label className="profile-playback-option">
-                <span>Time per image</span>
-                <ImageDurationControl idPrefix="profile-image-seconds" value={playbackPreferences.image_seconds} disabled={savingImageSeconds} onChange={(seconds) => void saveImageSeconds(seconds)} />
-                <small>Seconds each image stays on screen during a slideshow.</small>
-              </label>
-              <div className="profile-playback-option profile-offline-location">
-                <span>Offline download folder</span>
-                <button
-                  type="button"
-                  onClick={() => void chooseOfflineDownloadLocation()}
-                  disabled={offlineBusy}
-                >
-                  {offlineBusy ? "Choosing…" : offlineLocationName ? "Change folder" : "Choose folder"}
-                </button>
-                <small>
-                  {offlineLocationName
-                    ? `Downloads on this device are saved in ${offlineLocationName}.`
-                    : "Choose where offline copies are saved on this device."}
-                </small>
-              </div>
-              <label className="profile-device-path-option">
-                <input
-                  type="checkbox"
-                  aria-label="Show ‘Copy device path’ in media menus" aria-checked={showDevicePath} checked={showDevicePath}
-                  onChange={(e) => {
-                    setShowDevicePath(e.target.checked);
-                    try { localStorage.setItem("framebox-show-device-path", String(e.target.checked)); } catch {}
-                  }}
-                />
-                <span>Show ‘Copy device path’ in media menus</span>
-              </label>
-              <details className="profile-advanced"><summary>Advanced library loading<MenuIcon name="chevronDown" /></summary>
-              <label className="profile-device-path-option">
-                <input
-                  type="checkbox"
-                  aria-label="Load every item in large folders" aria-checked={Boolean(playbackPreferences.load_all_items)} checked={playbackPreferences.load_all_items || false}
-                  onChange={(e) => void saveLoadAllItems(e.target.checked)}
-                />
-                <span>Load every item in large folders<small>Loads all items together; large folders use more memory and open more slowly.</small></span>
-              </label>
-              </details>
-            </section>
+            <div id="settings-devices" className="settings-panel" hidden={settingsView !== "devices"}>
             <section className="profile-device-sessions">
               <div className="profile-settings-section-heading"><b>Signed-in devices</b></div>
               {deviceSessions.length ? deviceSessions.map((session) => {
@@ -9478,6 +9487,8 @@ export default function Home() {
                 </div>;
               }) : <small>No remembered devices.</small>}
             </section>
+            </div>
+            </div>
           </div>
         </div>
       )}
