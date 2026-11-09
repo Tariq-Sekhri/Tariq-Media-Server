@@ -1447,8 +1447,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
               return (
                 <>
                   {actionSummaries.length > 0 && (
-                    <div style={{ margin: "1.25rem 1.5rem 0", padding: "1rem", border: "1px solid var(--border)", borderRadius: "8px", background: "var(--surface-sunken)" }}>
-                      <div style={{ marginBottom: "0.8rem" }}><b>Media transactions</b><div style={{ fontSize: "0.8rem", color: "var(--muted)", marginTop: "0.2rem" }}>End-to-end browser timings and failure rates from client performance events.</div></div>
+                    <div style={{ margin: "0.5rem 1.5rem 0", padding: "1rem", border: "1px solid var(--border)", borderRadius: "8px", background: "var(--surface-sunken)" }}>
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "0.7rem" }}>
                         {actionSummaries.map((summary) => <div key={summary.phase} style={{ padding: "0.75rem", border: "1px solid var(--border)", borderRadius: "6px" }}>
                           <b style={{ display: "block", textTransform: "capitalize" }}>{summary.phase.replace("media_", "").replace("trash_", "trash ").replaceAll("_", " ")}</b>
