@@ -1993,34 +1993,7 @@ export default function AdminDashboard() {
 
       {section === "libraries" && (loading || !Object.keys(libraries).length ? <article className="admin-surface admin-section-surface">
         {loading ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading libraries</b></div> : <div className="admin-panel-empty"><span>▣</span><b>No libraries yet</b>{canManageLibraries && <button type="button" onClick={() => setShowCreateLibrary(true)}>Create your first library</button>}</div>}
-      </article> : librariesLayout !== 1 ? <LibrariesOptions layout={librariesLayout} libraries={libraries} users={users} types={libraryTypes} permissions={libraryPermissions} presetOf={libraryMemberPreset} presetLabel={libraryPresetLabel} update={updateLibraryDraft} setPreset={(path, name, preset) => preset === "none" ? toggleLibraryMember(path, name, false) : applyLibraryPreset(path, name, preset)} setPermission={setLibraryPermission} runTrickplay={(path) => void runTrickplayNow(path)} trickplayAction={trickplayAction} savingLibrary={savingLibrary} savedLibrary={savedLibrary} /> : <div className="admin-library-list">
-        {Object.entries(libraries).map(([path, library]) => {
-          const accessNames = [...new Set([...users.map((user) => user.name), ...library.members.map((member) => member.name)])].sort();
-          const libraryUrl = `/?folder=${encodeURIComponent(path)}`;
-          return <article className="admin-surface admin-library-card" key={path}>
-            <header>
-              <div>
-                <p>LIBRARY</p>
-                <h2>
-                  <a href={libraryUrl} onClick={(e) => e.preventDefault()} style={{ display: 'contents' }}>
-                    <button type="button" onClick={() => window.location.assign(libraryUrl)} style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
-                      {path}
-                    </button>
-                  </a>
-                </h2>
-                <span>{library.members.length} user{library.members.length === 1 ? "" : "s"} with access</span>
-              </div>
-              {(savingLibrary === path || savedLibrary === path) && <span className="admin-library-save-status" role="status">{savingLibrary === path ? "Saving changes…" : "Saved"}</span>}
-            </header>
-            <div className="admin-library-settings">
-              <section className="library-type-card"><span>Library type</span><select value={library.content_type} onChange={(event) => updateLibraryDraft(path, (current) => ({ ...current, content_type: event.target.value as LibraryContentType }))}>{libraryTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select><small>Controls how TMS organizes this library.</small><div className="library-quick-toggles"><label><span>Static folders</span><input aria-label={`Lock folder structure for ${path}`} type="checkbox" checked={library.folder_structure_static} onChange={(event) => updateLibraryDraft(path, (current) => ({ ...current, folder_structure_static: event.target.checked }))} /></label><label><span>Timeline previews</span><input aria-label={`Enable timeline previews for ${path}`} type="checkbox" checked={library.trickplay_enabled} onChange={(event) => updateLibraryDraft(path, (current) => ({ ...current, trickplay_enabled: event.target.checked }))} /></label></div>{library.trickplay_enabled && <div className="trickplay-run-now"><div><b>Generate previews</b></div><button type="button" className="admin-primary-action" disabled={trickplayAction === path} onClick={() => void runTrickplayNow(path)}>{trickplayAction === path ? "Queuing…" : "Generate now"}</button></div>}</section>
-              <section className="library-access-section"><div><div><span>User access</span><small>Choose an access level for each person.</small></div><span className="library-access-count">{library.members.length} enabled</span></div>
-                <div className="admin-library-members permission-matrix">{accessNames.map((name) => { const user = users.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase()); const member = library.members.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase()); const admin = Boolean(user?.is_admin); const preset = libraryMemberPreset(member); const enabled = admin || preset !== "none"; return <article key={name} className={`permission-matrix-row ${admin ? "admin-permission-row" : ""} ${enabled ? "is-enabled" : ""}`}><div className="permission-row-top"><div className="matrix-user"><span>{name.slice(0, 2).toUpperCase()}</span><div><b>{name}</b><small>{admin ? "Administrator" : libraryPresetLabel(preset)}</small></div></div>{admin ? <span className="matrix-admin-state">Full access</span> : <div className="matrix-presets"><button type="button" className={preset === "none" ? "active is-denied" : ""} onClick={() => toggleLibraryMember(path, name, false)}>No access</button><button type="button" className={preset === "viewer" ? "active" : ""} onClick={() => applyLibraryPreset(path, name, "viewer")}>Viewer</button><button type="button" className={preset === "user" ? "active" : ""} onClick={() => applyLibraryPreset(path, name, "user")}>User</button><button type="button" className={preset === "editor" ? "active" : ""} onClick={() => applyLibraryPreset(path, name, "editor")}>Editor</button><button type="button" className={preset === "manager" ? "active" : ""} onClick={() => applyLibraryPreset(path, name, "manager")}>Manager</button></div>}</div>{!admin && enabled && <div className="matrix-permissions">{libraryPermissions.map((permission) => <label key={permission.key} title={permission.description}><input aria-label={`${name} ${permission.label} for ${path}`} type="checkbox" checked={Boolean(member?.[permission.key])} disabled={!member} onChange={(event) => setLibraryPermission(path, name, permission.key, event.target.checked)} /><span>{permission.label}</span></label>)}</div>}</article>; })}</div>
-              </section>
-            </div>
-          </article>;
-        })}
-      </div>)}
+      </article> : <LibrariesOptions layout={librariesLayout} libraries={libraries} users={users} types={libraryTypes} permissions={libraryPermissions} presetOf={libraryMemberPreset} presetLabel={libraryPresetLabel} update={updateLibraryDraft} setPreset={(path, name, preset) => preset === "none" ? toggleLibraryMember(path, name, false) : applyLibraryPreset(path, name, preset)} setPermission={setLibraryPermission} runTrickplay={(path) => void runTrickplayNow(path)} trickplayAction={trickplayAction} savingLibrary={savingLibrary} savedLibrary={savedLibrary} />)}
     </section>
 
     {showCreateLibrary && <div className="admin-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreateLibrary(); }}>
