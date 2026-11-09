@@ -7300,3 +7300,10 @@ thead .lib-tabs-person { background: #12171b; }
 .admin-requests-empty { margin: 0; padding: 0; border: 0; background: none; color: #9faab4; text-align: left; font-size: 14px; }
 .admin-requests-deletions .admin-delete-request { padding: 14px 0; }
 @media (max-width: 900px) { .admin-requests-columns { grid-template-columns: 1fr; gap: 28px; } }
+
+/* Users: no card, content sits on the page background. */
+.admin-users-surface { border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.admin-users-surface > header { padding: 0 0 14px; border-bottom: 0; }
+.admin-users-surface > footer { padding: 13px 0; background: transparent; }
+.admin-users-surface .admin-user-table-head,
+.admin-users-surface .admin-user-row { padding-left: 0; padding-right: 0; }
