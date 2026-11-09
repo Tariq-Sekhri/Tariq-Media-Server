@@ -30,12 +30,13 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 export default function LibrariesOptions(props: LibrariesOptionProps) {
   const paths = Object.keys(props.libraries);
-  const names = [...new Set([...props.users.map((user) => user.name), ...paths.flatMap((path) => props.libraries[path].members.map((member) => member.name))])].sort((a, b) => a.localeCompare(b));
   const isAdmin = (name: string) => Boolean(props.users.find((user) => same(user.name, name))?.is_admin);
+  const names = [...new Set([...props.users.map((user) => user.name), ...paths.flatMap((path) => props.libraries[path].members.map((member) => member.name))])].filter((name) => !isAdmin(name)).sort((a, b) => a.localeCompare(b));
+  const accessCount = (path: string) => props.libraries[path].members.filter((member) => member.can_view && !isAdmin(member.name)).length;
   const memberOf = (path: string, name: string) => props.libraries[path].members.find((member) => same(member.name, name));
   const typeLabel = (type: ContentType) => props.types.find((option) => option.value === type)?.label ?? type;
   const status = (path: string) => props.savingLibrary === path ? "Saving…" : props.savedLibrary === path ? "Saved" : "";
-  const ctx = { ...props, paths, names, isAdmin, memberOf, typeLabel, status };
+  const ctx = { ...props, paths, names, isAdmin, accessCount, memberOf, typeLabel, status };
   return <SideBySide {...ctx} />;
 }
 
@@ -43,6 +44,7 @@ type Ctx = LibrariesOptionProps & {
   paths: string[];
   names: string[];
   isAdmin: (name: string) => boolean;
+  accessCount: (path: string) => number;
   memberOf: (path: string, name: string) => Member | undefined;
   typeLabel: (type: ContentType) => string;
   status: (path: string) => string;
@@ -82,7 +84,7 @@ function LibraryIndex({ ctx, path, onSelect, rich }: { ctx: Ctx; path: string; o
   return <nav className="admin-surface lib-opt-index" aria-label="Libraries">{ctx.paths.map((candidate) => {
     const item = ctx.libraries[candidate];
     return <button key={candidate} type="button" className={candidate === path ? "active" : undefined} aria-current={candidate === path ? "true" : undefined} onClick={() => onSelect(candidate)}>
-      <b>{candidate}</b><small>{ctx.typeLabel(item.content_type)} · {item.members.length} {item.members.length === 1 ? "person" : "people"}</small>
+      <b>{candidate}</b><small>{ctx.typeLabel(item.content_type)} · {ctx.accessCount(candidate)} {ctx.accessCount(candidate) === 1 ? "person" : "people"}</small>
       {rich && (item.folder_structure_static || item.trickplay_enabled) && <span className="lib-opt-flags">{item.folder_structure_static && <em>Static</em>}{item.trickplay_enabled && <em>Previews</em>}</span>}
     </button>;
   })}</nav>;
@@ -113,7 +115,7 @@ function SideBySide(ctx: Ctx) {
           {library.trickplay_enabled && <button type="button" className="lib-opt-ghost" disabled={ctx.trickplayAction === path} onClick={() => ctx.runTrickplay(path)}>{ctx.trickplayAction === path ? "Queuing…" : "Generate previews"}</button>}
         </section>
         <section>
-          <h3>Access <small>{library.members.length} enabled</small></h3>
+          <h3>Access <small>{ctx.accessCount(path)} enabled</small></h3>
           <ul className="lib-opt-access is-buttons">{ctx.names.map((name) => {
             const enabled = !ctx.isAdmin(name) && Boolean(ctx.memberOf(path, name)?.can_view);
             const key = `${path}\n${name}`;
