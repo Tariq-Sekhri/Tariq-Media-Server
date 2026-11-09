@@ -5442,6 +5442,7 @@
 .admin-process-row.is-ytdlp .admin-process-title { font-size: 12.5px; color: #e9eef2; font-weight: 700; white-space: normal; word-break: break-word; line-height: 1.35; }
 .admin-work-feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 18px; color: #a4afb8; font-size: 11px; }
 .admin-work-feedback strong { color: #f0b76e; font-weight: 600; }
+.admin-processes-surface > header { align-items: center; }
 .admin-work-feedback button { margin-left: auto; border: 1px solid #38414b; border-radius: 6px; padding: 5px 8px; color: #c4cdd5; background: #171b20; cursor: pointer; }
 .admin-process-row.is-failed .admin-process-state > b { color: #f0b76e; }
 .admin-ytdlp-info { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }

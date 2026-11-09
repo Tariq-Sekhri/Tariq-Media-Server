@@ -1536,11 +1536,11 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
               <p>LIVE QUEUE</p>
               <h2>{processes.filter((process) => isActiveWork(process.status)).length} active · {processes.filter((process) => !isActiveWork(process.status) && !isFinishedWork(process.status)).length} waiting / inactive · {processes.filter((process) => needsWorkAttention(process.status)).length} need attention</h2>
             </div>
-          </header>
-          <div className="admin-work-feedback" aria-live="polite">
-            {(processRefreshError || (processUpdatedAt !== null && processClock - processUpdatedAt > 15_000)) && <strong role="status">{processRefreshError || "Live status is delayed"}. Displayed work may be outdated.</strong>}
             <button type="button" aria-expanded={showFinishedWork} onClick={() => setShowFinishedWork((shown) => !shown)}>{showFinishedWork ? "Hide" : "Show"} finished work ({processes.filter((process) => isFinishedWork(process.status)).length})</button>
-          </div>
+          </header>
+          {(processRefreshError || (processUpdatedAt !== null && processClock - processUpdatedAt > 15_000)) && <div className="admin-work-feedback" aria-live="polite">
+            <strong role="status">{processRefreshError || "Live status is delayed"}. Displayed work may be outdated.</strong>
+          </div>}
           {loading ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading running work</b></div> : processes.some((process) => showFinishedWork || !isFinishedWork(process.status) || needsWorkAttention(process.status)) ? <div className="admin-process-list">{processes.filter((process) => showFinishedWork || !isFinishedWork(process.status) || needsWorkAttention(process.status)).map((process) => {
             const isYtDlp = process.id.startsWith("ytdlp:");
             const isFailed = needsWorkAttention(process.status);
