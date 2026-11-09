@@ -144,9 +144,42 @@ fn covered_by_automatic_pack(row: &Request, source: &Request, seasons: &BTreeSet
                 && source.auto_download_seasons.contains(&season)))
 }
 pub async fn save(state: &AppState, queue: &Queue) -> Result<(), (StatusCode, Json<Value>)> {
+    let previous: Queue = load(state, "discovery-requests.json").await.unwrap_or_default();
+    log_stage_changes(&previous, queue);
     write_persisted_json(&data_path(state, "discovery-requests.json"), queue)
         .await
         .map_err(internal)
+}
+// Every status change is logged so the metrics page can show how long
+// requests spend in each stage. A request leaves this queue when it is handed
+// to the download (or closed); its hash links it to the download's outcome.
+fn log_stage_changes(previous: &Queue, queue: &Queue) {
+    let now = unix_now();
+    let before: BTreeMap<&str, &Request> = previous.requests.iter().map(|r| (r.id.as_str(), r)).collect();
+    for r in &queue.requests {
+        let from = before.get(r.id.as_str()).map_or("new", |old| old.status.as_str());
+        if from != r.status {
+            log_stage(r, from, &r.status, now);
+        }
+    }
+    let current: BTreeSet<&str> = queue.requests.iter().map(|r| r.id.as_str()).collect();
+    for r in previous.requests.iter().filter(|r| !current.contains(r.id.as_str()) && !closed(&r.status)) {
+        log_stage(r, &r.status, "handed_off", now);
+    }
+}
+fn log_stage(r: &Request, from: &str, to: &str, now: u64) {
+    tracing::info!(
+        target: "tms_server::server_metrics",
+        event = "request_stage",
+        request_id = %r.id,
+        kind = %r.kind,
+        from = %from,
+        to = %to,
+        at = now,
+        created_at = r.created_at,
+        hash = %r.hash.as_deref().or(r.torrent_hash.as_deref()).unwrap_or("-"),
+        "Request stage changed"
+    );
 }
 pub async fn access(
     state: &AppState,

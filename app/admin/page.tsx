@@ -16,8 +16,9 @@ import "../discover/style.css";
 import "../admin-mobile.css";
 import { useBackLayer } from "../lib/back-layers";
 import { navigateApp } from "../lib/app-shell";
+import MetricsInsights from "./metrics-insights";
 
-type LogsResponse = { files: string[]; lines: string[]; actors: string[]; total_events: number; stored_events: number; total_bytes: number };
+type LogsResponse = { files: string[]; lines: string[]; actors: string[]; total_events: number; stored_events: number; total_bytes: number; server_lines?: string[]; error_lines?: string[] };
 type AdminUser = { id: number; name: string; password_set: boolean; created_at: number; last_active_at: number | null; is_admin: boolean; admin_permissions: AdminPermissions; storage_quota_bytes: number | null; used_bytes: number; reserved_bytes: number; available_bytes: number | null };
 type DeviceSession = { token: string; created_at: number; device: string; user_agent: string; ip_address: string; current: boolean; expires_at: number };
 type LibraryContentType = "mixed" | "movies_tv" | "music" | "files";
@@ -72,7 +73,7 @@ type AdminDownloadStatus = {
   };
   cookies?: YtDlpCookiesStatus;
 };
-const normalizeLogs = (value: Partial<LogsResponse>): LogsResponse => ({ files: value.files ?? [], lines: value.lines ?? [], actors: value.actors ?? [], total_events: value.total_events ?? value.lines?.length ?? 0, stored_events: value.stored_events ?? value.total_events ?? value.lines?.length ?? 0, total_bytes: value.total_bytes ?? 0 });
+const normalizeLogs = (value: Partial<LogsResponse>): LogsResponse => ({ files: value.files ?? [], lines: value.lines ?? [], actors: value.actors ?? [], total_events: value.total_events ?? value.lines?.length ?? 0, stored_events: value.stored_events ?? value.total_events ?? value.lines?.length ?? 0, total_bytes: value.total_bytes ?? 0, server_lines: value.server_lines ?? [], error_lines: value.error_lines ?? [] });
 type AdminProcessTransfer = { state: string; download_speed: number; upload_speed: number; completed_bytes: number; total_bytes: number; remaining_bytes: number; eta_seconds: number; seeds: number; peers: number };
 type AdminProcess = {
   id: string;
@@ -1521,6 +1522,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
               );
             })()
           )}
+          {!loading && <MetricsInsights lines={metricsLogs.lines} serverLines={metricsLogs.server_lines ?? []} errorLines={metricsLogs.error_lines ?? []} device={metricDeviceFilter} />}
         </article>
       )}
 

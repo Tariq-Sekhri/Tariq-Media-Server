@@ -6166,6 +6166,7 @@ export default function Home() {
     if (imageLoadReportedRef.current === loadStartedRef.current) return;
     
     let cancelled = false;
+    let firstContentReported = false;
     const finish = (loadMs: number, visibleImages: HTMLImageElement[], timedOut = false) => {
       if (cancelled || imageLoadReportedRef.current === loadStartedRef.current) return;
       const loadedImages = visibleImages.filter((image) => image.complete && image.naturalWidth > 0);
@@ -6202,7 +6203,17 @@ export default function Home() {
         const rect = img.getBoundingClientRect();
         return rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight && rect.bottom > 0;
       });
-      
+
+      // The first painted thumbnail is when the screen stops looking empty,
+      // which can be long before every visible image has loaded.
+      if (!firstContentReported && (images.length === 0 || visibleImages.some((image) => image.complete && image.naturalWidth > 0))) {
+        firstContentReported = true;
+        reportClientPerformance("library_first_content", performance.now() - totalStartedRef.current, {
+          cache_state: debugInfoRef.current.cacheState ?? "unknown",
+          folder: debugInfoRef.current.folder || "root",
+        });
+      }
+
       if (images.length === 0) {
         clearInterval(interval);
         finish(performance.now() - loadStartedRef.current, []);

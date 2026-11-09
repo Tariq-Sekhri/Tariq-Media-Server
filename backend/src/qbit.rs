@@ -2208,6 +2208,24 @@ pub async fn read_magnet_jobs(path: &Path) -> MagnetJobs {
 }
 
 pub async fn write_magnet_jobs(path: &Path, jobs: &MagnetJobs) -> Result<(), StatusCode> {
+    let previous = read_magnet_jobs(path).await;
+    let now = unix_now();
+    for job in jobs.jobs.iter().filter(|job| crate::is_finished_download_status(&job.status)) {
+        if previous.jobs.iter().any(|old| old.hash == job.hash && old.status == job.status) {
+            continue;
+        }
+        tracing::info!(
+            target: "tms_server::server_metrics",
+            event = "download_finished",
+            source = "torrent",
+            id = %job.hash,
+            outcome = %job.status,
+            at = now,
+            duration_s = now.saturating_sub(job.created_at),
+            bytes = job.reserved_bytes,
+            "Download finished"
+        );
+    }
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await

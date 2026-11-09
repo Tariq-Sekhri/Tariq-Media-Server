@@ -1611,6 +1611,10 @@ fn opened_timestamp(state: &UserState, path: &str) -> u64 {
 #[derive(Serialize)]
 struct AdminPerformanceResponse {
     lines: Vec<String>,
+    /// Server-side metric events: endpoint timings, request stages, downloads.
+    server_lines: Vec<String>,
+    /// Client error reports, grouped by screen on the metrics page.
+    error_lines: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -1885,6 +1889,7 @@ async fn main() {
     ensure_external_library_mounts(&state).await;
     spawn_download_watcher(state.clone());
     discovery::requests::start_worker(state.clone());
+    spawn_endpoint_stats_logger();
     spawn_ytdlp_tool_updater(state.clone());
     spawn_ytdlp_worker(state.clone());
     spawn_storage_maintenance(state.clone());
@@ -2116,6 +2121,7 @@ async fn main() {
         // Every file and per-file endpoint is checked against the caller's
         // library access before it reaches a handler or static file service.
         .layer(axum::middleware::from_fn_with_state(state.clone(), file_access_guard))
+        .layer(axum::middleware::from_fn(record_endpoint_timing))
         // Library responses can be many megabytes of repetitive JSON. Mobile
         // WebViews otherwise spend most of startup transferring that payload.
         .layer(CompressionLayer::new())
@@ -2482,39 +2488,147 @@ fn is_client_performance_line(line: &str) -> bool {
         .any(|part| part == "event=\"client_performance\"")
 }
 
-fn latest_performance_lines(logs_dir: &Path, files: &[String], limit: usize) -> Vec<String> {
+/// Server metric events share one log target so the metrics page can find
+/// them without scanning every line, and the metrics wipe can remove them.
+const SERVER_METRICS_TARGET: &str = "tms_server::server_metrics";
+
+fn is_server_metric_line(line: &str) -> bool {
+    line.contains("tms_server::server_metrics:")
+}
+
+fn is_image_load_line(line: &str) -> bool {
+    line.split_whitespace().any(|part| part == "phase=image_load")
+}
+
+/// One kind of log line to collect, newest first, up to `limit`.
+struct MetricLineBucket {
+    needle: &'static [u8],
+    accept: fn(&str) -> bool,
+    limit: usize,
+    lines: Vec<String>,
+}
+
+impl MetricLineBucket {
+    fn new(needle: &'static [u8], accept: fn(&str) -> bool, limit: usize) -> Self {
+        Self { needle, accept, limit, lines: Vec::new() }
+    }
+}
+
+fn collect_metric_lines(logs_dir: &Path, files: &[String], buckets: &mut [MetricLineBucket]) {
     // The backend runs as a debug build, so a byte-by-byte scan of ~1 GB of
     // logs took ~30s and the proxy timed out. memchr is compiled optimized
-    // (see Cargo.toml) and finds the sparse performance events quickly.
-    let finder = memchr::memmem::Finder::new(b"event=\"client_performance\"");
-    let mut lines = Vec::with_capacity(limit);
+    // (see Cargo.toml) and finds the sparse metric events quickly. Each file
+    // is read once for every kind of line.
     for name in files.iter().rev().filter(|name| name.starts_with("tms.")) {
+        if buckets.iter().all(|bucket| bucket.lines.len() >= bucket.limit) {
+            break;
+        }
         let Ok(bytes) = std::fs::read(logs_dir.join(name)) else {
             continue;
         };
-        let mut file_lines = Vec::new();
-        let mut last_start = usize::MAX;
-        for position in finder.find_iter(&bytes) {
-            let start = memchr::memrchr(b'\n', &bytes[..position]).map_or(0, |index| index + 1);
-            if start == last_start {
-                continue;
+        for bucket in buckets.iter_mut().filter(|bucket| bucket.lines.len() < bucket.limit) {
+            let finder = memchr::memmem::Finder::new(bucket.needle);
+            let mut file_lines = Vec::new();
+            let mut last_start = usize::MAX;
+            for position in finder.find_iter(&bytes) {
+                let start = memchr::memrchr(b'\n', &bytes[..position]).map_or(0, |index| index + 1);
+                if start == last_start {
+                    continue;
+                }
+                last_start = start;
+                let end = memchr::memchr(b'\n', &bytes[position..]).map_or(bytes.len(), |index| position + index);
+                let line = String::from_utf8_lossy(&bytes[start..end]);
+                let line = line.trim_end_matches('\r');
+                if (bucket.accept)(line) {
+                    file_lines.push(line.to_owned());
+                }
             }
-            last_start = start;
-            let end = memchr::memchr(b'\n', &bytes[position..]).map_or(bytes.len(), |index| position + index);
-            let line = String::from_utf8_lossy(&bytes[start..end]);
-            let line = line.trim_end_matches('\r');
-            if is_client_performance_line(line) {
-                file_lines.push(line.to_owned());
-            }
-        }
-        for line in file_lines.into_iter().rev() {
-            lines.push(line);
-            if lines.len() >= limit {
-                return lines;
+            for line in file_lines.into_iter().rev() {
+                if bucket.lines.len() >= bucket.limit {
+                    break;
+                }
+                bucket.lines.push(line);
             }
         }
     }
-    lines
+}
+
+fn latest_performance_lines(logs_dir: &Path, files: &[String], limit: usize) -> Vec<String> {
+    let mut buckets = [MetricLineBucket::new(b"event=\"client_performance\"", is_client_performance_line, limit)];
+    collect_metric_lines(logs_dir, files, &mut buckets);
+    let [bucket] = buckets;
+    bucket.lines
+}
+
+const ENDPOINT_LATENCY_BUCKETS_MS: [u64; 9] = [50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, u64::MAX];
+
+#[derive(Default, Serialize)]
+struct EndpointWindow {
+    route: String,
+    count: u64,
+    errors: u64,
+    total_ms: u64,
+    max_ms: u64,
+    /// Request counts per latency bucket (see ENDPOINT_LATENCY_BUCKETS_MS).
+    buckets: [u64; 9],
+}
+
+fn endpoint_stats() -> &'static std::sync::Mutex<BTreeMap<String, EndpointWindow>> {
+    static STATS: std::sync::OnceLock<std::sync::Mutex<BTreeMap<String, EndpointWindow>>> = std::sync::OnceLock::new();
+    STATS.get_or_init(Default::default)
+}
+
+/// Times every routed request. Only per-route totals are kept, and they are
+/// logged every few minutes, so request volume does not grow the logs.
+async fn record_endpoint_timing(request: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let route = request
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map(|path| format!("{} {}", request.method(), path.as_str()));
+    let started = Instant::now();
+    let response = next.run(request).await;
+    if let Some(route) = route {
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        let mut stats = endpoint_stats().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let window = stats.entry(route.clone()).or_insert_with(|| EndpointWindow { route, ..Default::default() });
+        window.count += 1;
+        if response.status().is_server_error() {
+            window.errors += 1;
+        }
+        window.total_ms += elapsed_ms;
+        window.max_ms = window.max_ms.max(elapsed_ms);
+        let bucket = ENDPOINT_LATENCY_BUCKETS_MS
+            .iter()
+            .position(|limit| elapsed_ms <= *limit)
+            .unwrap_or(ENDPOINT_LATENCY_BUCKETS_MS.len() - 1);
+        window.buckets[bucket] += 1;
+    }
+    response
+}
+
+fn spawn_endpoint_stats_logger() {
+    tokio::spawn(async {
+        let mut interval = tokio::time::interval(Duration::from_secs(300));
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            let window = std::mem::take(&mut *endpoint_stats().lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+            if window.is_empty() {
+                continue;
+            }
+            let Ok(details) = serde_json::to_string(&window.into_values().collect::<Vec<_>>()) else {
+                continue;
+            };
+            tracing::info!(
+                target: SERVER_METRICS_TARGET,
+                event = "endpoint_stats",
+                at = unix_now(),
+                window_s = 300,
+                details = %details,
+                "Server endpoint timings"
+            );
+        }
+    });
 }
 
 async fn admin_performance(
@@ -2530,16 +2644,30 @@ async fn admin_performance(
     }
     let (files, _, _) = list_admin_log_files(&state.logs_dir).await;
     let logs_dir = state.logs_dir.clone();
-    let lines = tokio::task::spawn_blocking(move || latest_performance_lines(&logs_dir, &files, 5_000))
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let buckets = tokio::task::spawn_blocking(move || {
+        // Image loads are by far the most frequent event, so they get their
+        // own cap and cannot crowd out playback and library events.
+        let mut buckets = [
+            MetricLineBucket::new(b"event=\"client_performance\"", |line| is_client_performance_line(line) && !is_image_load_line(line), 5_000),
+            MetricLineBucket::new(b"event=\"client_performance\"", |line| is_client_performance_line(line) && is_image_load_line(line), 2_000),
+            MetricLineBucket::new(b"tms_server::server_metrics:", is_server_metric_line, 5_000),
+            MetricLineBucket::new(b"tms_server::client_error:", |_| true, 2_000),
+        ];
+        collect_metric_lines(&logs_dir, &files, &mut buckets);
+        buckets
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let [client, images, server, errors] = buckets;
+    let mut lines = client.lines;
+    lines.extend(images.lines);
     tracing::info!(
         event = "admin_performance_loaded",
         duration_ms = started.elapsed().as_millis() as u64,
-        returned_events = lines.len(),
+        returned_events = lines.len() + server.lines.len() + errors.lines.len(),
         "Admin performance metrics loaded"
     );
-    Ok(Json(AdminPerformanceResponse { lines }))
+    Ok(Json(AdminPerformanceResponse { lines, server_lines: server.lines, error_lines: errors.lines }))
 }
 
 async fn clear_admin_performance(
@@ -2562,7 +2690,7 @@ async fn clear_admin_performance(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         let retained = content
             .lines()
-            .filter(|line| !is_client_performance_line(line))
+            .filter(|line| !is_client_performance_line(line) && !is_server_metric_line(line))
             .collect::<Vec<_>>();
         let removed_from_file = content.lines().count() - retained.len();
         if removed_from_file == 0 {
@@ -16730,6 +16858,25 @@ async fn read_ytdlp_jobs(path: &Path) -> YtDlpJobs {
 }
 
 async fn write_ytdlp_jobs(path: &Path, jobs: &YtDlpJobs) -> Result<(), StatusCode> {
+    let previous = read_ytdlp_jobs(path).await;
+    let now = unix_now();
+    for job in jobs.jobs.iter().filter(|job| is_finished_download_status(&job.status)) {
+        if previous.jobs.iter().any(|old| old.id == job.id && old.status == job.status) {
+            continue;
+        }
+        tracing::info!(
+            target: SERVER_METRICS_TARGET,
+            event = "download_finished",
+            source = "ytdlp",
+            id = %job.id,
+            outcome = %job.status,
+            at = now,
+            duration_s = now.saturating_sub(job.created_at),
+            bytes = job.downloaded_bytes,
+            extractor = %job.extractor.replace(char::is_whitespace, "_"),
+            "Download finished"
+        );
+    }
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -16741,6 +16888,10 @@ async fn write_ytdlp_jobs(path: &Path, jobs: &YtDlpJobs) -> Result<(), StatusCod
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     replace_private_file(&temporary, path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+pub(crate) fn is_finished_download_status(status: &str) -> bool {
+    matches!(status, "completed" | "failed" | "cancelled" | "interrupted")
 }
 
 fn address_is_private(address: IpAddr) -> bool {

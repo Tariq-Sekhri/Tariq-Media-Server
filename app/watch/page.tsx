@@ -550,6 +550,39 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
   const reportedWatchLoadRef = useRef<string | null>(null);
   const reportedPlaybackAttemptRef = useRef<string | null>(null);
   detailsRef.current = details;
+  // Playback quality per video: whether it started, and how often it stalled
+  // once playing. Seeks and quality switches are not counted as stalls.
+  const playbackQualityRef = useRef({ src: "", openedAt: 0, intent: false, started: false, failed: false, mode: "direct", quality: "", watchedMs: 0, lastTickAt: 0, stallCount: 0, stallMs: 0, stallStartedAt: 0 });
+  const flushPlaybackQuality = useCallback(() => {
+    const session = playbackQualityRef.current;
+    if (session.stallStartedAt) {
+      session.stallMs += performance.now() - session.stallStartedAt;
+      session.stallStartedAt = 0;
+    }
+    if (session.started && session.watchedMs >= 5_000) {
+      reportClientPerformance("playback_session", session.watchedMs, {
+        watched_ms: Math.round(session.watchedMs),
+        stall_count: session.stallCount,
+        stall_ms: Math.round(session.stallMs),
+        mode: session.mode,
+        quality: session.quality,
+      });
+    }
+    session.watchedMs = 0;
+    session.stallCount = 0;
+    session.stallMs = 0;
+    session.lastTickAt = 0;
+  }, []);
+  useEffect(() => {
+    if (!details?.src || details.kind !== "video") return;
+    playbackQualityRef.current = { src: details.src, openedAt: performance.now(), intent: Boolean(details.playIntent), started: false, failed: false, mode: "direct", quality: "", watchedMs: 0, lastTickAt: 0, stallCount: 0, stallMs: 0, stallStartedAt: 0 };
+    const flushWhenHidden = () => { if (document.visibilityState === "hidden") flushPlaybackQuality(); };
+    document.addEventListener("visibilitychange", flushWhenHidden);
+    return () => {
+      document.removeEventListener("visibilitychange", flushWhenHidden);
+      flushPlaybackQuality();
+    };
+  }, [details?.src, details?.kind, details?.playIntent, flushPlaybackQuality]);
 
   useEffect(() => {
     if (details?.src && details?.kind === "video") {
@@ -2195,6 +2228,24 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     }
     updateLoadingTarget(video.currentTime + streamOffsetRef.current);
   };
+  const notePlaybackStall = (video: HTMLVideoElement) => {
+    const session = playbackQualityRef.current;
+    if (!session.started || session.stallStartedAt || video.paused || video.seeking || qualityBusyRef.current || playbackStartupPending()) return;
+    session.stallStartedAt = performance.now();
+    session.stallCount += 1;
+  };
+  const tickPlaybackQuality = (video: HTMLVideoElement) => {
+    const session = playbackQualityRef.current;
+    const now = performance.now();
+    if (session.stallStartedAt && !video.paused && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+      session.stallMs += now - session.stallStartedAt;
+      session.stallStartedAt = 0;
+    }
+    if (session.started && !session.stallStartedAt && !video.paused && !video.seeking && session.lastTickAt && now - session.lastTickAt < 2_000) {
+      session.watchedMs += now - session.lastTickAt;
+    }
+    session.lastTickAt = now;
+  };
   const finishLoadingTarget = (video: HTMLVideoElement) => {
     if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return;
     setBufferingWithoutPosition(false);
@@ -3505,6 +3556,18 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     const timer = window.setTimeout(() => setLoadStalled(true), 20000);
     return () => window.clearTimeout(timer);
   }, [stallCandidate, details?.src]);
+  useEffect(() => {
+    const session = playbackQualityRef.current;
+    if (!loadStalled || !session.src || session.started || session.failed) return;
+    session.failed = true;
+    reportClientPerformance("video_start", performance.now() - session.openedAt, {
+      outcome: "error",
+      reason: videoLoadError ? "error" : "timeout",
+      intent: session.intent,
+      mode: hlsRef.current ? "hls" : "direct",
+      quality,
+    });
+  }, [loadStalled, videoLoadError, quality]);
   const retryPlayback = () => {
     setLoadStalled(false);
     setVideoLoadError(false);
@@ -3757,6 +3820,21 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         }}
         onPlaying={(event) => {
           finishLoadingTarget(event.currentTarget);
+          const playbackSession = playbackQualityRef.current;
+          if (!playbackSession.started && playbackSession.src) {
+            playbackSession.started = true;
+            playbackSession.mode = hlsRef.current ? "hls" : "direct";
+            playbackSession.quality = quality;
+            if (!playbackSession.failed) {
+              reportClientPerformance("video_start", performance.now() - playbackSession.openedAt, {
+                outcome: "success",
+                intent: playbackSession.intent,
+                mode: playbackSession.mode,
+                quality,
+              });
+            }
+          }
+          tickPlaybackQuality(event.currentTarget);
           if (details?.playAttemptId && details?.playAttemptStartedAt && reportedPlaybackAttemptRef.current !== details.playAttemptId) {
             reportedPlaybackAttemptRef.current = details.playAttemptId;
             reportClientPerformance("playback_started", Date.now() - details.playAttemptStartedAt, {
@@ -3797,11 +3875,11 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
           }
         }}
         onSeeked={(event) => { const video = event.currentTarget; finishLoadingTarget(video); saveProgress(video); reportPlayback(video.paused ? "paused" : "resumed", video); }}
-        onWaiting={(event) => markBuffering(event.currentTarget)}
+        onWaiting={(event) => { markBuffering(event.currentTarget); notePlaybackStall(event.currentTarget); }}
         onStalled={(event) => markBuffering(event.currentTarget)}
         onVolumeChange={(event) => { setVolume(readMediaVolumePosition(event.currentTarget)); setMuted(event.currentTarget.muted); }}
         onProgress={(event) => updateBufferedRanges(event.currentTarget)}
-        onTimeUpdate={(event) => { const video = event.currentTarget; updateBufferedRanges(video); const absoluteTime = video.currentTime + streamOffsetRef.current; if (loadingTargetRef.current === null || Math.abs(absoluteTime - loadingTargetRef.current) <= 2) { finishLoadingTarget(video); setCurrentTime(absoluteTime); } if (Date.now() - lastSavedAt.current > 3000) { lastSavedAt.current = Date.now(); saveProgress(video); } if (Date.now() - lastRemoteSaveAt.current > 5000 && !video.paused && !video.seeking) { lastRemoteSaveAt.current = Date.now(); reportPlayback("resumed", video); } }}
+        onTimeUpdate={(event) => { const video = event.currentTarget; tickPlaybackQuality(video); updateBufferedRanges(video); const absoluteTime = video.currentTime + streamOffsetRef.current; if (loadingTargetRef.current === null || Math.abs(absoluteTime - loadingTargetRef.current) <= 2) { finishLoadingTarget(video); setCurrentTime(absoluteTime); } if (Date.now() - lastSavedAt.current > 3000) { lastSavedAt.current = Date.now(); saveProgress(video); } if (Date.now() - lastRemoteSaveAt.current > 5000 && !video.paused && !video.seeking) { lastRemoteSaveAt.current = Date.now(); reportPlayback("resumed", video); } }}
         onEnded={(event) => handlePlaybackEnded(event.currentTarget)}
       />), videoShadow)}
     </div>}

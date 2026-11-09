@@ -7340,3 +7340,19 @@ thead .lib-tabs-person { background: #12171b; }
 /* Admin inside the shared TMS header: the workspace already clears the header. */
 .admin-shell.admin-embedded { min-height: 0; padding-top: 0; padding-bottom: 0; background: transparent; }
 .admin-workspace .admin-metrics-surface.admin-section-surface { margin-top: 4px !important; }
+.admin-insights { display: grid; gap: 14px; padding-top: 14px; }
+.admin-insight-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.admin-insight-stat { display: grid; gap: 2px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-sunken); }
+.admin-insight-stat > span { color: #9aa3ab; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; }
+.admin-insight-stat > strong { color: #f1f3f4; font-size: 24px; font-weight: 600; }
+.admin-insight-stat > small { color: #9aa3ab; font-size: 13px; }
+.admin-insights .warn { color: #f08a8a; }
+.admin-insights h3 { margin: 0 0 6px; color: #c9d0d6; font-size: 13px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.admin-insight-note { margin: 0 0 6px; color: #c9d0d6; font-size: 14px; }
+.admin-insight-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.admin-insight-table th { padding: 5px 8px; border-bottom: 1px solid #262c32; color: #8d969e; font-size: 12px; font-weight: 600; text-align: left; white-space: nowrap; }
+.admin-insight-table td { padding: 6px 8px; border-bottom: 1px solid #1c2126; color: #dfe4e8; white-space: nowrap; }
+.admin-insight-table td.admin-insight-route { max-width: 520px; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, monospace; font-size: 13px; }
+.admin-insight-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.admin-insight-split > div { min-width: 0; }
+.admin-insights section { min-width: 0; overflow-x: auto; }
