@@ -309,7 +309,7 @@ export default function AdminDashboard() {
   const throttleSaveTimerRef = useRef<number | null>(null);
   const [loading, setLoading] = useState(() => users.length === 0);
   const [error, setError] = useState("");
-  const [loadTiming, setLoadTiming] = useState<AdminLoadTiming>({ cacheState: "miss", cacheLoadTimeMs: 0, serverState: "loading" });
+  const [, setLoadTiming] = useState<AdminLoadTiming>({ cacheState: "miss", cacheLoadTimeMs: 0, serverState: "loading" });
   const [showAddUser, setShowAddUser] = useState(false);
   const [userName, setUserName] = useState("");
   const [userPassword, setUserPassword] = useState("");
@@ -1241,11 +1241,6 @@ export default function AdminDashboard() {
             {section !== "processes" && section !== "trash" && <button type="button" aria-label={loading ? "Refreshing" : "Refresh"} onClick={() => void refresh()} disabled={loading || clearingMetrics}><MenuIcon name="restore" />{loading ? "Refreshing" : "Refresh"}</button>}
           </div>
         </header>
-        {section === "metrics" && <div className="admin-load-debug" aria-live="polite">
-          Cache: {loadTiming.cacheState.toUpperCase()} ({loadTiming.cacheLoadTimeMs.toFixed(1)}ms)
-          {" | "}Server: {loadTiming.serverState === "loading" ? "LOADING…" : loadTiming.serverState.toUpperCase()}{loadTiming.serverLoadTimeMs !== undefined ? ` (${loadTiming.serverLoadTimeMs.toFixed(1)}ms)` : ""}
-          {loadTiming.serverState === "loading" ? " | Total: LOADING…" : loadTiming.totalLoadTimeMs !== undefined ? ` | Total: ${loadTiming.totalLoadTimeMs.toFixed(1)}ms` : ""}
-        </div>}
       </div>
       {error && <div className="admin-page-error">{error}</div>}
 
