@@ -5761,6 +5761,13 @@ export default function Home() {
     const itemPath = mediaPath(item) ?? "";
     const isDownloaded = Boolean(item.offline) || section === "offline";
     const isLibrary = item.kind === "folder" && !item.parent && !isDownloaded;
+    const catalogTitle = catalogTitleForItem(item);
+    const matchedTitleName = catalogTitle
+      ? titleMetadata[titleMetadataKey(catalogTitle.path, catalogTitle.evidence.kind)]?.name
+      : undefined;
+    const downloadLabel = catalogTitle
+      ? `Download ${matchedTitleName || (catalogTitle.evidence.kind === "series" ? "show" : "movie")}`
+      : "Download folder";
     const episodeId = item.kind === "video" ? episodeNumbers(`${item.parent ?? ""}/${item.name}`) : null;
     const seriesPath = titlePathForVideo(item);
     const episodeInfo = episodeId && seriesPath ? resolveEpisodeMetadata(titleMetadata[titleMetadataKey(seriesPath, "series")]?.videos, episodeId.season, episodeId.episode) : undefined;
@@ -5772,7 +5779,7 @@ export default function Home() {
       <div
         ref={itemMenuRef}
         className="card-menu"
-        role="dialog" aria-modal="true" aria-label={`Actions for ${menuTitle}`}
+        role="dialog" aria-modal="true" aria-label={`Actions for ${matchedTitleName || menuTitle}`}
         style={{
           left: contextItem.x,
           top: contextItem.y,
@@ -5790,7 +5797,7 @@ export default function Home() {
           }
         }}
       >
-        <div className="card-menu-title">{menuTitle}</div>
+        <div className="card-menu-title">{matchedTitleName || menuTitle}</div>
         {!item.trashed && mediaPath(item) && (
           <button
             disabled={isDownloaded || offlineBusy}
@@ -5799,7 +5806,7 @@ export default function Home() {
               setContextItem(null);
             }}
           >
-            {isDownloaded || offlineBundles.some((bundle) => bundle.path === mediaPath(item) && bundle.status === "ready") ? <><MenuIcon name="check" />Available offline</> : <><MenuIcon name="offline" />Save offline on this device</>}
+            {isDownloaded || offlineBundles.some((bundle) => bundle.path === mediaPath(item) && bundle.status === "ready") ? <><MenuIcon name="check" />Available offline</> : <><MenuIcon name="offline" />Save offline</>}
           </button>
         )}
         <div className="media-management">
@@ -5808,7 +5815,7 @@ export default function Home() {
             navigateApp(`/?${new URLSearchParams({ folder: item.parent! })}`);
           }}><MenuIcon name="folder" />Go to location</button>
         )}
-        {!item.trashed && (
+        {!item.trashed && !catalogTitle && (
           <button
             disabled={isDownloaded}
             onClick={() => {
@@ -5851,7 +5858,7 @@ export default function Home() {
               setContextItem(null);
             }}
           >
-            <MenuIcon name="download" />Download folder
+            <MenuIcon name="download" />{downloadLabel}
           </button>
         )}
         {!item.trashed && item.path && (
@@ -7912,7 +7919,7 @@ export default function Home() {
             <div className="empty-state">
               <span aria-hidden="true"><MenuIcon name="download" /></span>
               <h2>{query.trim() || activeTags.length ? "No matches found" : currentFolder ? "This folder is empty" : "No offline downloads yet"}</h2>
-              <p>{query.trim() || activeTags.length ? "Try a different search or clear the active filters." : "Open a media menu and choose Save offline on this device."}</p><button type="button" onClick={() => setSection("library")}>Browse library</button>
+              <p>{query.trim() || activeTags.length ? "Try a different search or clear the active filters." : "Open a media menu and choose Save offline."}</p><button type="button" onClick={() => setSection("library")}>Browse library</button>
             </div>
           ) : backendState === "loading" || isFetchingNewFolder ? (
             <div className="media-grid">
