@@ -5979,11 +5979,9 @@
   .discover-panel .discover-toolbar { position: absolute; right: 0; top: -54px; margin: 0; }
   .discover-panel .discover-toolbar button { display: grid; place-items: center; width: 48px; height: 48px; padding: 0; font-size: 22px; }
   .discover-panel .discover-settings-label { display: none; }
-  .discover-panel .discover-controls { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; }
-  .discover-controls .discover-tabs { grid-column: 1 / -1; width: 100%; }
+  .discover-panel .discover-controls { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 8px; }
+  .discover-controls .discover-search { grid-column: 1 / -1; }
   .discover-controls > select,.discover-controls > button { width: 100%; }
-  .discover-extra-filters { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .discover-extra-filters select,.discover-extra-filters input { min-width: 0; width: 100%; }
   .discover-dialog #discover-request-permissions { scroll-margin-top: 64px; outline-offset: 4px; }
   .discover-dialog .discover-policy-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .discover-policy-row > b { grid-column: 1 / -1; }

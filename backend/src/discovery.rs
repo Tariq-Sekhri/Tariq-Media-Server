@@ -87,9 +87,6 @@ pub(super) fn media_kind(kind: &str) -> Result<&str, (StatusCode, Json<Value>)> 
         )),
     }
 }
-pub(super) fn is_anime_catalog(kind: &str) -> bool {
-    kind == "anime"
-}
 pub(super) async fn tmdb(
     state: &AppState,
     path: &str,
@@ -337,94 +334,238 @@ async fn forget_history(
 }
 #[derive(Deserialize)]
 struct BrowseQuery {
-    kind: String,
-    feed: Option<String>,
     q: Option<String>,
     page: Option<u32>,
-    genre: Option<u32>,
-    year: Option<u32>,
+    /// `movie`, `tv`, or empty/`all` for both catalogs.
+    #[serde(rename = "type")]
+    media: Option<String>,
+    sort: Option<String>,
+    /// Comma-separated genre slugs from [`GENRES`]; every listed genre must match.
+    genres: Option<String>,
+    year_from: Option<u32>,
+    year_to: Option<u32>,
+    rating: Option<f32>,
+    votes: Option<u32>,
+    runtime_min: Option<u32>,
+    runtime_max: Option<u32>,
+    lang: Option<String>,
 }
-pub(super) fn is_unfiltered_catalog(kind: &str) -> bool {
-    kind == "all"
+/// Shared genre slugs with their TMDB movie and series ids. TMDB splits genres
+/// differently per catalog, so a slug may exist in only one of them.
+const GENRES: &[(&str, Option<u32>, Option<u32>)] = &[
+    ("action", Some(28), Some(10759)),
+    ("adventure", Some(12), Some(10759)),
+    ("animation", Some(16), Some(16)),
+    ("comedy", Some(35), Some(35)),
+    ("crime", Some(80), Some(80)),
+    ("documentary", Some(99), Some(99)),
+    ("drama", Some(18), Some(18)),
+    ("family", Some(10751), Some(10751)),
+    ("fantasy", Some(14), Some(10765)),
+    ("history", Some(36), None),
+    ("horror", Some(27), None),
+    ("kids", None, Some(10762)),
+    ("music", Some(10402), None),
+    ("mystery", Some(9648), Some(9648)),
+    ("reality", None, Some(10764)),
+    ("romance", Some(10749), None),
+    ("science-fiction", Some(878), Some(10765)),
+    ("thriller", Some(53), None),
+    ("war", Some(10752), Some(10768)),
+    ("western", Some(37), Some(37)),
+];
+impl BrowseQuery {
+    fn kinds(&self) -> Vec<&'static str> {
+        match self.media.as_deref() {
+            Some("movie") => vec!["movie"],
+            Some("tv") => vec!["tv"],
+            _ => vec!["movie", "tv"],
+        }
+    }
+    fn sort(&self) -> &str {
+        match self.sort.as_deref() {
+            Some(s @ ("popular" | "rating" | "votes" | "newest" | "oldest" | "title")) => s,
+            _ => "trending",
+        }
+    }
+    fn genre_slugs(&self) -> Vec<&str> {
+        self.genres
+            .as_deref()
+            .unwrap_or("")
+            .split(',')
+            .map(str::trim)
+            .filter(|s| GENRES.iter().any(|(slug, ..)| slug == s))
+            .collect()
+    }
+    /// Genre ids for one catalog, or `None` when a selected genre does not exist there.
+    fn genre_ids(&self, kind: &str) -> Option<Vec<u32>> {
+        let mut ids = Vec::new();
+        for slug in self.genre_slugs() {
+            let (_, movie, tv) = GENRES.iter().find(|(s, ..)| *s == slug)?;
+            let id = if kind == "movie" { *movie } else { *tv }?;
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        Some(ids)
+    }
+    fn language(&self) -> Option<String> {
+        self.lang
+            .as_deref()
+            .map(str::trim)
+            .filter(|l| l.len() == 2 && l.chars().all(|c| c.is_ascii_lowercase()))
+            .map(str::to_string)
+    }
+    fn has_filters(&self) -> bool {
+        !self.genre_slugs().is_empty()
+            || self.year_from.is_some()
+            || self.year_to.is_some()
+            || self.rating.is_some_and(|r| r > 0.0)
+            || self.votes.is_some_and(|v| v > 0)
+            || self.runtime_min.is_some()
+            || self.runtime_max.is_some()
+            || self.language().is_some()
+    }
 }
-fn feed_request(
+fn discover_request(
     kind: &str,
-    anime: bool,
     query: &BrowseQuery,
     page: u32,
-) -> (String, Vec<(&'static str, String)>) {
+) -> Option<(String, Vec<(&'static str, String)>)> {
+    let movie = kind == "movie";
+    let date = if movie { "primary_release_date" } else { "first_air_date" };
+    let today = time::OffsetDateTime::now_utc().date().to_string();
     let mut params = vec![
         ("page", page.to_string()),
         ("include_adult", "false".to_string()),
     ];
-    if anime || query.genre.is_some() || query.year.is_some() || (kind == "movie" && query.feed.as_deref() == Some("upcoming")) {
+    let genres = query.genre_ids(kind)?;
+    if !genres.is_empty() {
         params.push((
-            if kind == "tv" { "first_air_date.lte" } else { "primary_release_date.lte" },
-            time::OffsetDateTime::now_utc().date().to_string(),
+            "with_genres",
+            genres.iter().map(u32::to_string).collect::<Vec<_>>().join(","),
         ));
-        if anime {
-            params.push(("with_original_language", "ja".into()));
-            params.push(("with_genres", query.genre.unwrap_or(16).to_string()));
-        } else if let Some(genre) = query.genre {
-            params.push(("with_genres", genre.to_string()));
-        }
-        if let Some(year) = query.year {
-            params.push((
-                if kind == "tv" {
-                    "first_air_date_year"
-                } else {
-                    "primary_release_year"
-                },
-                year.to_string(),
-            ));
-        }
-        match query.feed.as_deref().unwrap_or("trending") {
-            "upcoming" if kind == "tv" => params.push(("sort_by", "first_air_date.desc".into())),
-            "upcoming" => params.push(("sort_by", "primary_release_date.desc".into())),
-            _ => params.push(("sort_by", "popularity.desc".into())),
-        }
-        return (format!("discover/{kind}"), params);
     }
-    let path = match query.feed.as_deref().unwrap_or("trending") {
-        "popular" => format!("{kind}/popular"),
-        "upcoming" => format!(
-            "{kind}/{}",
-            if kind == "movie" {
-                "upcoming"
-            } else {
-                "on_the_air"
-            }
-        ),
-        _ => format!("trending/{kind}/week"),
-    };
-    (path, params)
+    if let Some(year) = query.year_from {
+        params.push((
+            if movie { "primary_release_date.gte" } else { "first_air_date.gte" },
+            format!("{year}-01-01"),
+        ));
+    }
+    let upper = query
+        .year_to
+        .map(|year| format!("{year}-12-31"))
+        .filter(|end| *end < today)
+        .unwrap_or(today);
+    params.push((
+        if movie { "primary_release_date.lte" } else { "first_air_date.lte" },
+        upper,
+    ));
+    if let Some(rating) = query.rating.filter(|r| *r > 0.0) {
+        params.push(("vote_average.gte", rating.to_string()));
+    }
+    let sort = query.sort();
+    // Rating sorts are otherwise dominated by obscure titles with a handful of votes.
+    let min_votes = query.votes.unwrap_or(if sort == "rating" { 200 } else { 0 });
+    if min_votes > 0 {
+        params.push(("vote_count.gte", min_votes.to_string()));
+    }
+    if let Some(min) = query.runtime_min {
+        params.push(("with_runtime.gte", min.to_string()));
+    }
+    if let Some(max) = query.runtime_max {
+        params.push(("with_runtime.lte", max.to_string()));
+    }
+    if let Some(lang) = query.language() {
+        params.push(("with_original_language", lang));
+    }
+    params.push((
+        "sort_by",
+        match sort {
+            "rating" => "vote_average.desc".into(),
+            "votes" => "vote_count.desc".into(),
+            "newest" => format!("{date}.desc"),
+            "oldest" => format!("{date}.asc"),
+            "title" if movie => "original_title.asc".into(),
+            "title" => "original_name.asc".into(),
+            _ => "popularity.desc".into(),
+        },
+    ));
+    Some((format!("discover/{kind}"), params))
 }
-fn blend(movies: &Value, series: &Value) -> Value {
-    let tagged = |value: &Value, media: &str| {
-        value["results"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|mut row| {
+fn tag_rows(value: &Value, media: &str) -> Vec<Value> {
+    value["results"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|mut row| {
+            if row["media_type"].is_null() {
                 row["media_type"] = json!(media);
-                row
-            })
-            .collect::<Vec<_>>()
+            }
+            row
+        })
+        .collect()
+}
+fn row_date(row: &Value) -> String {
+    row["release_date"]
+        .as_str()
+        .or(row["first_air_date"].as_str())
+        .unwrap_or("")
+        .to_string()
+}
+fn sort_rows(rows: &mut [Value], sort: &str) {
+    let num = |row: &Value, key: &str| row[key].as_f64().unwrap_or(0.0);
+    let title = |row: &Value| {
+        row["title"]
+            .as_str()
+            .or(row["name"].as_str())
+            .unwrap_or("")
+            .to_lowercase()
     };
-    let mut rows = tagged(movies, "movie");
-    rows.extend(tagged(series, "tv"));
-    rows.sort_by(|a, b| {
-        b["popularity"]
-            .as_f64()
-            .unwrap_or(0.0)
-            .total_cmp(&a["popularity"].as_f64().unwrap_or(0.0))
-    });
-    let pages = movies["total_pages"]
-        .as_u64()
-        .unwrap_or(1)
-        .max(series["total_pages"].as_u64().unwrap_or(1));
-    json!({"page": movies["page"], "results": rows, "total_pages": pages})
+    match sort {
+        "rating" => rows.sort_by(|a, b| num(b, "vote_average").total_cmp(&num(a, "vote_average"))),
+        "votes" => rows.sort_by(|a, b| num(b, "vote_count").total_cmp(&num(a, "vote_count"))),
+        "newest" => rows.sort_by_key(|row| std::cmp::Reverse(row_date(row))),
+        "oldest" => rows.sort_by_key(row_date),
+        "title" => rows.sort_by_key(title),
+        _ => rows.sort_by(|a, b| num(b, "popularity").total_cmp(&num(a, "popularity"))),
+    }
+}
+/// Post-filters rows from endpoints without filter support (search, trending).
+fn row_matches(row: &Value, query: &BrowseQuery) -> bool {
+    let media = row["media_type"].as_str().unwrap_or("");
+    if !query.kinds().contains(&media) {
+        return false;
+    }
+    let Some(ids) = query.genre_ids(media) else {
+        return false;
+    };
+    let row_ids = row["genre_ids"].as_array();
+    if !ids
+        .iter()
+        .all(|id| row_ids.is_some_and(|r| r.iter().any(|x| x == id)))
+    {
+        return false;
+    }
+    let year = row_date(row).get(..4).and_then(|y| y.parse::<u32>().ok());
+    if query.year_from.is_some_and(|from| year.is_none_or(|y| y < from))
+        || query.year_to.is_some_and(|to| year.is_none_or(|y| y > to))
+    {
+        return false;
+    }
+    if query
+        .rating
+        .is_some_and(|r| row["vote_average"].as_f64().unwrap_or(0.0) < r as f64)
+        || query
+            .votes
+            .is_some_and(|v| row["vote_count"].as_u64().unwrap_or(0) < v as u64)
+    {
+        return false;
+    }
+    query
+        .language()
+        .is_none_or(|lang| row["original_language"] == lang.as_str())
 }
 fn has_released(title: &Value, today: &str) -> bool {
     let date = if title["media_type"] == "movie" || title.get("title").is_some() {
@@ -438,6 +579,11 @@ fn has_released(title: &Value, today: &str) -> bool {
 #[cfg(test)]
 mod catalog_tests {
     use super::*;
+
+    fn query(raw: &str) -> BrowseQuery {
+        let uri: axum::http::Uri = format!("/?{raw}").parse().unwrap();
+        Query::<BrowseQuery>::try_from_uri(&uri).unwrap().0
+    }
 
     #[test]
     fn future_movies_and_series_are_hidden_including_anime() {
@@ -461,6 +607,41 @@ mod catalog_tests {
         assert!(has_released(&json!({"name":"Undated", "first_air_date":""}), "2026-10-09"));
         assert!(has_released(&json!({"title":"Undated"}), "2026-10-09"));
     }
+
+    #[test]
+    fn genres_map_per_catalog_and_skip_catalogs_without_them() {
+        let q = query("genres=action,science-fiction");
+        assert_eq!(q.genre_ids("movie"), Some(vec![28, 878]));
+        assert_eq!(q.genre_ids("tv"), Some(vec![10759, 10765]));
+        assert_eq!(query("genres=horror").genre_ids("tv"), None);
+        assert!(discover_request("tv", &query("genres=horror"), 1).is_none());
+    }
+
+    #[test]
+    fn discover_request_applies_filters() {
+        let (path, params) = discover_request(
+            "movie",
+            &query("year_from=1990&year_to=1999&rating=7&lang=ja&sort=rating"),
+            2,
+        )
+        .unwrap();
+        assert_eq!(path, "discover/movie");
+        let has = |k: &str, v: &str| params.iter().any(|(key, value)| *key == k && value == v);
+        assert!(has("primary_release_date.gte", "1990-01-01"));
+        assert!(has("primary_release_date.lte", "1999-12-31"));
+        assert!(has("vote_average.gte", "7"));
+        assert!(has("vote_count.gte", "200"));
+        assert!(has("with_original_language", "ja"));
+        assert!(has("sort_by", "vote_average.desc"));
+    }
+
+    #[test]
+    fn search_rows_are_post_filtered() {
+        let q = query("type=movie&genres=animation&lang=ja");
+        assert!(row_matches(&json!({"media_type":"movie","genre_ids":[16],"original_language":"ja"}), &q));
+        assert!(!row_matches(&json!({"media_type":"tv","genre_ids":[16],"original_language":"ja"}), &q));
+        assert!(!row_matches(&json!({"media_type":"movie","genre_ids":[18],"original_language":"ja"}), &q));
+    }
 }
 async fn browse(
     State(state): State<AppState>,
@@ -468,71 +649,68 @@ async fn browse(
     Query(query): Query<BrowseQuery>,
 ) -> ApiResult<Value> {
     user(&state, &headers).await?;
-    let anime = is_anime_catalog(&query.kind);
-    let unfiltered = is_unfiltered_catalog(&query.kind);
     let page = query.page.unwrap_or(1).clamp(1, 500);
     let search = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty());
-    let mut result = if let Some(q) = search {
-        let mut params = vec![
-            ("page", page.to_string()),
-            ("include_adult", "false".to_string()),
-        ];
+    let kinds = query.kinds();
+    let sort = query.sort();
+    let base = vec![
+        ("page", page.to_string()),
+        ("include_adult", "false".to_string()),
+    ];
+    let (mut rows, total_pages, post_filter) = if let Some(q) = search {
+        let mut params = base;
         params.push(("query", q.chars().take(150).collect()));
-        let path = if anime || unfiltered {
+        let path = if kinds.len() == 2 {
             "search/multi".to_string()
         } else {
-            format!("search/{}", media_kind(&query.kind)?)
+            format!("search/{}", kinds[0])
         };
-        tmdb(&state, &path, &params).await?
-    } else if unfiltered {
-        let (movie_path, movie_params) = feed_request("movie", false, &query, page);
-        let (tv_path, tv_params) = feed_request("tv", false, &query, page);
-        let (movies, series) = tokio::try_join!(
-            tmdb(&state, &movie_path, &movie_params),
-            tmdb(&state, &tv_path, &tv_params)
-        )?;
-        blend(&movies, &series)
-    } else {
-        let kind = if anime && query.feed.as_deref() == Some("movies") {
-            "movie"
+        let value = tmdb(&state, &path, &params).await?;
+        (tag_rows(&value, kinds[0]), value["total_pages"].as_u64().unwrap_or(1), true)
+    } else if sort == "trending" && !query.has_filters() {
+        let path = if kinds.len() == 2 {
+            "trending/all/week".to_string()
         } else {
-            media_kind(&query.kind)?
+            format!("trending/{}/week", kinds[0])
         };
-        let (path, params) = feed_request(kind, anime, &query, page);
-        tmdb(&state, &path, &params).await?
-    };
-    if let Some(rows) = result["results"].as_array_mut() {
-        let today = time::OffsetDateTime::now_utc().date().to_string();
-        rows.retain(|v| v["adult"] != true && has_released(v, &today));
-        for row in rows.iter_mut() {
-            if row["media_type"].is_null() {
-                row["media_type"] = json!(if row.get("title").is_some() { "movie" } else { "tv" });
+        let value = tmdb(&state, &path, &base).await?;
+        (tag_rows(&value, kinds[0]), value["total_pages"].as_u64().unwrap_or(1), true)
+    } else {
+        let requests: Vec<_> = kinds
+            .iter()
+            .filter_map(|kind| discover_request(kind, &query, page).map(|r| (*kind, r)))
+            .collect();
+        let values = match requests.as_slice() {
+            [(_, (a_path, a_params)), (_, (b_path, b_params))] => {
+                let (a, b) = tokio::try_join!(
+                    tmdb(&state, a_path, a_params),
+                    tmdb(&state, b_path, b_params)
+                )?;
+                vec![a, b]
             }
+            [(_, (path, params))] => vec![tmdb(&state, path, params).await?],
+            _ => Vec::new(),
+        };
+        let mut rows = Vec::new();
+        let mut pages = 0;
+        for ((kind, _), value) in requests.iter().zip(&values) {
+            rows.extend(tag_rows(value, kind));
+            pages = pages.max(value["total_pages"].as_u64().unwrap_or(0));
         }
-        if unfiltered {
-            rows.retain(|v| matches!(v["media_type"].as_str(), Some("movie") | Some("tv")));
-        }
-        if anime {
-            rows.retain(|v| {
-                let media = v["media_type"].as_str().unwrap_or("");
-                if search.is_some() && !media.is_empty() && media != "movie" && media != "tv" {
-                    return false;
-                }
-                let is_jp = v["original_language"] == "ja"
-                    || v["origin_country"]
-                        .as_array()
-                        .is_some_and(|c| c.iter().any(|x| x == "JP"));
-                let is_anim = v["genre_ids"]
-                    .as_array()
-                    .is_some_and(|g| g.iter().any(|x| x == 16))
-                    || v["genres"]
-                        .as_array()
-                        .is_some_and(|g| g.iter().any(|x| x == 16 || x["id"] == 16));
-                is_jp && is_anim
-            });
-        }
+        sort_rows(&mut rows, sort);
+        (rows, pages.max(1), false)
+    };
+    let today = time::OffsetDateTime::now_utc().date().to_string();
+    rows.retain(|v| {
+        v["adult"] != true
+            && matches!(v["media_type"].as_str(), Some("movie") | Some("tv"))
+            && has_released(v, &today)
+            && (!post_filter || row_matches(v, &query))
+    });
+    if search.is_some() && sort != "trending" {
+        sort_rows(&mut rows, sort);
     }
-    Ok(Json(result))
+    Ok(Json(json!({"page": page, "results": rows, "total_pages": total_pages.min(500)})))
 }
 async fn detail(
     State(state): State<AppState>,

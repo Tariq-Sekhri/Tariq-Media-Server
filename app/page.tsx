@@ -1471,7 +1471,6 @@ export default function Home() {
   const [searchCaret, setSearchCaret] = useState(query.length);
   const [selectedSuggestion, setSelectedSuggestion] = useState<string | null>(null);
   const [compactScreen, setCompactScreen] = useState(false);
-  const [discoverHeaderQuery, setDiscoverHeaderQuery] = useState(() => typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("dq") ?? "");
   const itemMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const media = window.matchMedia("(max-width: 760px)");
@@ -2482,7 +2481,7 @@ export default function Home() {
     }
     if (section === "discover") {
       const current = new URLSearchParams(window.location.search);
-      ["dq", "dkind"].forEach((key) => {
+      ["dq", "dtype", "dsort", "dg", "dyf", "dyt", "dr", "dv", "drmin", "drmax", "dl"].forEach((key) => {
         const value = current.get(key);
         if (value) params.set(key, value);
       });
@@ -6378,24 +6377,23 @@ export default function Home() {
               <span className="search-icon" aria-hidden="true"><MenuIcon name="search" /></span>
               <input
                 ref={searchInput}
-                aria-label={section === "discover" ? "Search Discover" : "Search library"}
-                placeholder={section === "discover" ? "Search Discover" : "Search library"}
+                aria-label="Search library"
+                placeholder="Search library"
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
-                value={section === "discover" ? discoverHeaderQuery : query}
+                value={query}
                 role="combobox"
                 aria-autocomplete="list"
                 aria-expanded={searchFocused}
                 aria-controls="search-suggestions"
                 aria-activedescendant={searchFocused && searchSuggestions.some((suggestion) => suggestion.id === selectedSuggestion) ? `suggestion-${selectedSuggestion}` : undefined}
-                onFocus={() => setSearchFocused(section !== "discover")}
+                onFocus={() => setSearchFocused(true)}
                 onSelect={(event) => { setSearchCaret(event.currentTarget.selectionStart ?? query.length); }}
                 onBlur={() =>
                   window.setTimeout(() => setSearchFocused(false), 120)
                 }
                 onChange={(event) => {
-                  if (section === "discover") { setDiscoverHeaderQuery(event.target.value); return; }
                   setQuery(event.target.value);
                   setSearchCaret(event.target.selectionStart ?? event.target.value.length);
                   setSelectedSuggestion(null);
@@ -6403,7 +6401,6 @@ export default function Home() {
                 }}
                 onKeyDown={(event) => {
                   if (event.nativeEvent.isComposing) return;
-                  if (section === "discover") { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } return; }
                   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                     event.preventDefault();
                     setSearchFocused(true);
@@ -6424,11 +6421,11 @@ export default function Home() {
                 }}
               />
               <kbd>Ctrl K</kbd>
-              <button type="button" className="search-submit" onClick={event => { event.stopPropagation(); if (section === "discover") searchInput.current?.focus(); else submitSearch(); }} aria-label="Search">
+              <button type="button" className="search-submit" onClick={event => { event.stopPropagation(); submitSearch(); }} aria-label="Search">
                 <MenuIcon name="search" />
               </button>
             </div>
-            {searchFocused && section !== "discover" && (
+            {searchFocused && (
               <div
                 ref={searchSuggestionsPanel}
                 id="search-suggestions"
@@ -7297,7 +7294,7 @@ export default function Home() {
           )}
 
           {section === "discover" ? (
-            <Discover query={discoverHeaderQuery} onQueryChange={setDiscoverHeaderQuery} />
+            <Discover />
           ) : section === "notes" ? (
             <div className="shared-notes-page">
               <RichTextEditor
