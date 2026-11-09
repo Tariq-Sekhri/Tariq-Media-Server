@@ -12,6 +12,7 @@ import { Capacitor } from "@capacitor/core";
 import { API_BASE, ancestorTags, inheritedTags, resolveEpisodeMetadata, apiEntryToMediaItem, episodeNumbers, formatBytes, isMovieWatch, isShowWatch, mediaEvidenceForFolder, mediaUrl, previewFrameUrl, gridThumbUrl, seasonNumberForFolder, stableId, supportedFormats, titleCollectionForFolder, titleCollectionSortOrder, volumeFromSlider, volumeLabelFromSlider, sliderFromVolume, type ApiLibraryEntry, type MediaItem } from "./lib/media";
 import { completeSearchToken, fuzzyMatches, matchesSearchQuery, parseSearchQuery, searchCompletionContext, searchFields } from "./lib/search";
 import { buildSearchSuggestions, canSuggestLibraryPath, searchSuggestionItemPath, type SearchSuggestion, type SuggestionKind } from "./lib/search-suggestions";
+import { offlineFolderCovers } from "./lib/offline-covers";
 import { browseTagFilters } from "./lib/browse-tag-filters";
 import { queueSourceForItem, startPagedShuffle, startPlaybackQueue, writeQueueSource, type QueueSource } from "./lib/playback-queue";
 import { authFetch, canAccessAdminPanel, clearSession, getSessionToken, getSessionUser, hasAdminPermission, isAbortError, logOut, reportClientError, reportClientPerformance } from "./lib/auth";
@@ -29,7 +30,8 @@ import TagInput from "./TagInput";
 import { usePlaybackSession } from "./PlaybackProvider";
 import { navigateApp } from "./lib/app-shell";
 import { startPlaybackSession, playbackSessionSnapshot, setPlaybackSession } from "./lib/playback-session";
-import { readLocalWatchProgress, savesWatchProgress } from "./lib/watch-progress";
+import { hydrateNativeWatchProgress } from "./lib/native-watch-progress";
+import { mergeWatchProgress, readLocalWatchProgress, savesWatchProgress, syncLocalWatchProgress, writeLocalWatchProgress } from "./lib/watch-progress";
 import RichTextEditor from "./RichTextEditor";
 import { authorizeOfflineSync, chooseOfflineLocation, clearPendingOfflineFavorite, clearPendingOfflineOrganization, hydratePendingOfflineChanges, listOfflineBundles, makeAvailableOffline, offlineLocation, openConfiguredTmsServer, openOfflineFile, pendingOfflineFavoriteOverrides, queueOfflineFavorite, queueOfflineOrganization, queueOfflinePlaylistCreate, queueOfflinePlaylistDelete, queueOfflineTagCreate, queueOfflineTagDelete, readOfflineUserState, readPendingOfflineChanges, reconcileOfflineBundle, removeOfflineBundle, resolveOfflineFileUrl, retryOfflineBundle, saveOfflineUserState, syncPendingOfflineOrganization, type OfflineBundle, type OfflineFile } from "./lib/offline";
 import { applyPendingOrganization, emptyPendingChanges, isOfflinePlaylistId, type PendingOrganization } from "./lib/offline-organization";
@@ -1126,6 +1128,8 @@ export default function Home() {
   const [pendingDiscoverRequests, setPendingDiscoverRequests] = useState(0);
   const pendingAdminNotifications = pendingDeleteRequests + pendingDiscoverRequests;
   const [requestedDeletePaths, setRequestedDeletePaths] = useState<Set<string>>(() => new Set());
+  const [offlineMetadataHydrated, setOfflineMetadataHydrated] = useState(!Capacitor.isNativePlatform());
+  const offlineMetadataHydration = useRef<Promise<void>>(Promise.resolve());
   const [playback, setPlayback] = useState<Record<string, PlaybackState>>(() => initialSnapshot?.playback ?? {});
   const [lastAccessed, setLastAccessed] = useState<Record<string, number>>(() => initialSnapshot?.lastAccessed ?? {});
   // Tags and playlists edited offline are shown as they will be once synced.
@@ -1979,17 +1983,16 @@ export default function Home() {
   }, [sessionUser?.id]);
 
   useEffect(() => {
-    if (section !== "offline") return;
     let cancelled = false;
     // The offline shell cannot access the connected WebView's localStorage.
     // Hydrate the last signed-in user's saved favorites/tags before attempting
     // the network request below, so filters and edits work without a server.
-    void hydratePendingOfflineChanges().then(() => readOfflineUserState<OfflineUserState>()).then((state) => {
+    offlineMetadataHydration.current = hydratePendingOfflineChanges().then(() => readOfflineUserState<OfflineUserState>()).then((state) => {
       if (cancelled || !state) return;
       applyOrganizationState(state);
       applyFavoritePaths(state.favorites ?? []);
-    }).catch(() => undefined);
-    void authFetch(`${API_BASE}/api/user-state`).then(async (response) => {
+    }).catch(() => undefined).then(() => { if (!cancelled) setOfflineMetadataHydrated(true); });
+    void offlineMetadataHydration.current.then(() => authFetch(`${API_BASE}/api/user-state`, { signal: AbortSignal.timeout(15_000) })).then(async (response) => {
       if (!response.ok || cancelled) return;
       const state = await response.json() as UserState;
       if (cancelled) return;
@@ -1997,10 +2000,10 @@ export default function Home() {
       applyFavoritePaths(state.favorites);
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [section]);
+  }, [sessionUser?.id]);
 
   useEffect(() => {
-    if (!sessionUser?.id) return;
+    if (!sessionUser?.id || !offlineMetadataHydrated) return;
     // Mirror only organization metadata to the device-owned store. The server
     // remains authoritative and this copy exists solely for the offline shell.
     saveOfflineUserState({
@@ -2009,7 +2012,7 @@ export default function Home() {
       tag_catalog: tagCatalog,
       playlists,
     });
-  }, [customTags, favoritePaths, playlists, sessionUser?.id, tagCatalog]);
+  }, [customTags, favoritePaths, offlineMetadataHydrated, playlists, sessionUser?.id, tagCatalog]);
 
   useEffect(() => {
     if (section !== "offline" || !offlineBrowseLocation) return;
@@ -3929,17 +3932,59 @@ export default function Home() {
 
   useEffect(() => {
     if (backendState !== "online") return;
+    if (!sessionUser?.id) return;
     let cancelled = false;
-    void syncPendingOfflineOrganization().then(async ({ synced, favoritesSynced, catalogSynced, processed, playlistIds }) => {
-      if (cancelled || !processed) return;
-      // A playlist created offline keeps its place under its new server id.
-      setActivePlaylistId((current) => current && isOfflinePlaylistId(current) && current in playlistIds ? playlistIds[current] : current);
-      await reloadOrganizationState().catch(() => undefined);
-      const total = synced + favoritesSynced + catalogSynced;
-      if (!cancelled && total) flash(`${total} offline change${total === 1 ? "" : "s"} synced`);
-    });
-    return () => { cancelled = true; };
-  }, [backendState]);
+    let running = false;
+    const sync = async () => {
+      if (cancelled || running || document.hidden) return;
+      running = true;
+      try {
+        await offlineMetadataHydration.current;
+        await hydrateNativeWatchProgress();
+        const { synced, favoritesSynced, catalogSynced, processed, playlistIds } = await syncPendingOfflineOrganization();
+        if (cancelled) return;
+        const response = await authFetch(`${API_BASE}/api/user-state`, { signal: AbortSignal.timeout(15_000) });
+        if (!response.ok) return;
+        const state = await response.json() as UserState;
+        if (cancelled) return;
+        applyOrganizationState(state);
+        applyFavoritePaths(state.favorites);
+        if (processed) {
+          setActivePlaylistId((current) => current && isOfflinePlaylistId(current) && current in playlistIds ? playlistIds[current] : current);
+          const total = synced + favoritesSynced + catalogSynced;
+          if (total) flash(`${total} offline change${total === 1 ? "" : "s"} synced`);
+        }
+        const local = readLocalWatchProgress(sessionUser?.id);
+        await syncLocalWatchProgress(state.playback, local, async (path, progress) => {
+          if (cancelled) return;
+          const saved = await authFetch(`${API_BASE}/api/activity`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(15_000),
+            body: JSON.stringify({ path, media_name: path.split("/").at(-1), event: progress.completed ? "completed" : "paused", position: progress.position, duration: progress.duration, save_progress: true }),
+          });
+          if (!saved.ok) throw new Error("Playback progress will retry when the server is available.");
+        });
+        if (cancelled) return;
+        const latest = readLocalWatchProgress(sessionUser?.id);
+        setPlayback(mergeWatchProgress(state.playback, latest));
+        for (const [path, progress] of Object.entries(state.playback)) {
+          if (!latest[path] || progress.updated > latest[path].updated) writeLocalWatchProgress(sessionUser!.id, path, progress);
+        }
+
+      } catch { /* Preserve local changes and retry without requiring a refresh. */ }
+      finally { running = false; }
+    };
+    void sync();
+    const refresh = () => { void sync(); };
+    const timer = window.setInterval(refresh, 15_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [backendState, sessionUser?.id]);
   const buildBulkOrganizationUpdates = () => {
     const addedTags = bulkOrganizeTags.map((value) => value.trim()).filter(Boolean);
     const directPaths = selectedOrganizableItems
@@ -4280,25 +4325,22 @@ export default function Home() {
     if (!files.length) throw new Error("No hosted files were found in this folder.");
     return files;
   };
-  const collectOfflineCovers = (path: string, files: OfflineFile[], coverPaths = folderCovers): Record<string, OfflineFile> => {
-    const folderPaths = new Set<string>([path]);
-    for (const file of files) {
-      const parts = file.path.split("/");
-      for (let index = 1; index < parts.length; index += 1) {
-        const folderPath = parts.slice(0, index).join("/");
-        if (folderPath === path || folderPath.startsWith(`${path}/`)) folderPaths.add(folderPath);
-      }
-    }
-    return Object.fromEntries(Array.from(folderPaths).flatMap((folderPath) => {
-      const coverName = coverPaths[folderPath];
-      if (!coverName) return [];
-      return [[folderPath, {
-        id: `offline-cover-${stableId(folderPath)}`, path: folderPath,
-        name: "folder-cover.jpg", kind: "image" as const, size: 0,
-        url: `${API_BASE}/folder-covers/${encodeURIComponent(coverName)}`,
-        relativePath: `.tms-folder-cover-${stableId(folderPath)}.jpg`,
-      } satisfies OfflineFile]];
-    }));
+  const collectOfflineCovers = (path: string, files: OfflineFile[], coverPaths = folderCovers, previous: Record<string, OfflineFile> = {}, sourceItems = items) => {
+    const origin = new URL(API_BASE || window.location.origin, window.location.href).href;
+    return offlineFolderCovers(path, files, (folderPath) => {
+      const custom = coverPaths[folderPath];
+      if (custom) return `${API_BASE}/folder-covers/${encodeURIComponent(custom)}`;
+      const poster = titleMetadata[titleMetadataKey(folderPath, "movie")]?.poster
+        ?? titleMetadata[titleMetadataKey(folderPath, "series")]?.poster;
+      if (poster) return poster;
+      const folder = sourceItems.find((item) => item.kind === "folder" && mediaPath(item) === folderPath);
+      if (folder?.previewKind === "image") return folder.previewThumbSrc ?? folder.previewSrc;
+      if (folder?.previewKind === "video" && folder.previewPath) return previewFrameUrl(folder.previewPath);
+      if (previous[folderPath]) return previous[folderPath].url;
+      const candidates = files.filter((file) => file.path.startsWith(`${folderPath}/`) && (file.kind === "image" || file.kind === "video"));
+      const preview = candidates[stableId(`cover:${folderPath}`) % candidates.length];
+      return preview?.kind === "image" ? preview.url : preview ? previewFrameUrl(preview.path) : undefined;
+    }, origin);
   };
   const saveItemOffline = async (item: MediaItem) => {
     const path = mediaPath(item);
@@ -4311,12 +4353,12 @@ export default function Home() {
     }
     setOfflineBusy(true);
     try {
-      let location = await offlineLocation();
+      let location = await offlineLocation(true);
       if (!location.configured) location = await chooseOfflineLocation();
       setOfflineLocationName(location.name || undefined);
       flash(item.kind === "folder" ? `Finding files in ${item.name}…` : `Preparing ${item.name}…`);
       const files = await collectOfflineFiles(item);
-      const covers = item.kind === "folder" ? collectOfflineCovers(path, files) : {};
+      const covers = item.kind === "folder" ? collectOfflineCovers(path, files, folderCovers, {}, [item, ...items]) : {};
       const updateBundle = (bundle: OfflineBundle) => setOfflineBundles((current) => {
         const index = current.findIndex((entry) => entry.id === bundle.id);
         if (index < 0) return [bundle, ...current];
@@ -4350,7 +4392,7 @@ export default function Home() {
             id: 0, path: sourcePath, name: bundle.name, kind: "folder", size: "0 B", updated: "", tags: [], owner: "", tone: "",
             parent: sourcePath.split("/").slice(0, -1).join("/"),
           });
-          const covers = collectOfflineCovers(sourcePath, files, coverPaths);
+          const covers = collectOfflineCovers(sourcePath, files, coverPaths, bundle.covers);
           const sameFiles = files.length === bundle.files.length && files.every((file, index) => {
             const saved = bundle.files[index];
             return file.path === saved?.path && file.name === saved.name
@@ -4381,7 +4423,7 @@ export default function Home() {
       }
     })().catch(() => undefined);
     return () => { cancelled = true; };
-  }, [backendState, folderCovers, offlineBundles, offlineCatalogSyncTick, sessionUser?.id]);
+  }, [backendState, folderCovers, offlineBundles, offlineCatalogSyncTick, sessionUser?.id, titleMetadata]);
 
   useEffect(() => {
     if (backendState !== "online" || !sessionUser?.id) return;
@@ -7416,7 +7458,9 @@ export default function Home() {
                   // must stay on the fetched catalog artwork (with an explicit
                   // user-uploaded cover still allowed as an override).
                   const isCatalogFolder = Boolean(isTitle || titleCollection);
-                  const coverImage = isCatalogFolder
+                  const coverImage = item.offline && item.previewKind === "image" && item.previewSrc
+                    ? item.previewSrc
+                    : isCatalogFolder
                     ? customCover
                       ?? (titleCollection
                         ? seasonArtwork ?? seriesMetadata?.poster ?? seriesCustomCover

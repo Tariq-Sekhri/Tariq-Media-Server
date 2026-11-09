@@ -10,6 +10,7 @@ import { playbackSessionSnapshot, serverPlaybackSessionSnapshot, subscribePlayba
 import { resolveOfflineFileUrl } from "./lib/offline";
 import { navigateApp, useAppShell } from "./lib/app-shell";
 import { readLocalWatchProgress } from "./lib/watch-progress";
+import { connectNativeWatchProgress } from "./lib/native-watch-progress";
 import type { MediaItem } from "./lib/media";
 
 export const usePlaybackSession = () => useSyncExternalStore(subscribePlaybackSession, playbackSessionSnapshot, serverPlaybackSessionSnapshot);
@@ -22,6 +23,7 @@ function SessionAudioPlayer(props: ComponentProps<typeof MiniAudioPlayer>) {
 }
 
 export default function PlaybackProvider({ children }: { children: ReactNode }) {
+  useEffect(connectNativeWatchProgress, []);
   const session = usePlaybackSession();
   const routePathname = usePathname();
   const shell = useAppShell();

@@ -17,6 +17,7 @@ export type OfflineFile = {
   url: string;
   relativePath: string;
   localUri?: string;
+  public?: boolean;
 };
 
 export type OfflineBundle = {
@@ -109,14 +110,32 @@ const currentOwner = () => {
   return { id: user?.id ?? 0, name: user?.name ?? "User" };
 };
 
-const directoryPermission = async (handle: FileSystemDirectoryHandle, request: boolean) => {
+const restoredDirectoryPermissions: FileSystemDirectoryHandle[] = [];
+let directoryPermissionRestores: Promise<void> = Promise.resolve();
+const directoryPermission = async (handle: FileSystemDirectoryHandle, request: boolean, mode: "read" | "readwrite" = "readwrite") => {
   const permissionHandle = handle as FileSystemDirectoryHandle & {
-    queryPermission(options: { mode: "readwrite" }): Promise<PermissionState>;
-    requestPermission(options: { mode: "readwrite" }): Promise<PermissionState>;
+    queryPermission(options: { mode: "read" | "readwrite" }): Promise<PermissionState>;
+    requestPermission(options: { mode: "read" | "readwrite" }): Promise<PermissionState>;
   };
-  const current = await permissionHandle.queryPermission({ mode: "readwrite" });
-  if (current === "granted" || !request) return current;
-  return permissionHandle.requestPermission({ mode: "readwrite" });
+  const current = await permissionHandle.queryPermission({ mode });
+  if (current === "granted") return current;
+  if (!request) {
+    // Chromium restores persistent grants through requestPermission after a
+    // stored handle is loaded. A missing grant cannot be prompted in the
+    // background; keep the handle and let a user action authorize it later.
+    if (current !== "prompt") return current;
+    const result = directoryPermissionRestores.then(async () => {
+      for (const restored of restoredDirectoryPermissions) {
+        if (restored === handle || (handle.isSameEntry && await handle.isSameEntry(restored).catch(() => false))) return permissionHandle.queryPermission({ mode });
+      }
+      restoredDirectoryPermissions.push(handle);
+      try { return await permissionHandle.requestPermission({ mode }); }
+      catch { return current; }
+    });
+    directoryPermissionRestores = result.then(() => undefined, () => undefined);
+    return result;
+  }
+  return permissionHandle.requestPermission({ mode });
 };
 
 const storedDirectory = () => transactionRequest<FileSystemDirectoryHandle | undefined>(SETTINGS, "readonly", (store) => store.get(DIRECTORY_KEY));
@@ -152,7 +171,7 @@ export const resolveOfflineFileUrl = async (bundleId: string, fileId: string) =>
     return { url: Capacitor.convertFileSrc(file.localUri), bundle, file, mimeType: offlineMimeType(file) };
   }
   const root = bundle.directoryHandle ?? await storedDirectory();
-  if (!root || await directoryPermission(root, false) !== "granted") throw new Error("Reconnect the original download folder to open this file.");
+  if (!root || await directoryPermission(root, false, "read") !== "granted") throw new Error("Allow access to the saved offline folder to open this file.");
   let directory = await root.getDirectoryHandle("TMS Offline");
   directory = await directory.getDirectoryHandle(`${safeSegment(bundle.name)}-${bundle.id.slice(0, 8)}`);
   const handle = await browserFileHandle(directory, file, root);
@@ -312,7 +331,7 @@ export const syncPendingOfflineOrganization = async () => {
   if (!hasPendingChanges(pending)) {
     return { processed: 0, synced: 0, favoritesSynced: 0, catalogSynced: 0, playlistIds: {} as Record<string, string | null>, remaining: 0, favoritesRemaining: 0 };
   }
-  const result = await syncPendingChanges(pending, (path, init) => authFetch(path, init));
+  const result = await syncPendingChanges(pending, (path, init) => authFetch(path, { ...init, signal: AbortSignal.timeout(15_000) }));
   await updatePending((current) => finishPendingSync(current, result));
   const remaining = readPendingOfflineChanges();
   return {
@@ -326,9 +345,10 @@ export const syncPendingOfflineOrganization = async () => {
   };
 };
 
-export const offlineLocation = async () => {
+export const offlineLocation = async (requestAccess = false) => {
   if (Capacitor.isNativePlatform()) return NativeOffline.getLocation();
   const handle = await storedDirectory();
+  if (handle && requestAccess && await directoryPermission(handle, true) !== "granted") throw new Error("Allow access to the saved offline folder. You do not need to choose it again.");
   return { configured: Boolean(handle), name: handle?.name };
 };
 
@@ -350,6 +370,8 @@ export const chooseOfflineLocation = async () => {
     }
   }
   await transactionRequest(SETTINGS, "readwrite", (store) => store.put(handle, DIRECTORY_KEY));
+  // Protect the saved handle/catalog from automatic storage eviction.
+  if (typeof navigator !== "undefined") await navigator.storage?.persist?.().catch(() => false);
   return { configured: true, name: handle.name };
 };
 
@@ -427,7 +449,7 @@ const writeBrowserBundle = async (bundle: OfflineBundle, onProgress?: (bundle: O
       : file.relativePath.split("/").filter(Boolean).map(safeSegment);
     const fileName = parts.pop() ?? safeSegment(file.name);
     for (const part of parts) directory = await directory.getDirectoryHandle(part, { create: true });
-    const response = await authFetch(file.url);
+    const response = file.public ? await fetch(file.url, { credentials: "omit" }) : await authFetch(file.url);
     if (!response.ok || !response.body) throw new Error(`Could not download ${file.name} (${response.status})`);
     const target = await directory.getFileHandle(fileName, { create: true });
     const writable = await target.createWritable();

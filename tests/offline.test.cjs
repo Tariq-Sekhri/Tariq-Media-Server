@@ -60,10 +60,11 @@ function folder(name, deletionError) {
   return root;
 }
 
-function setup(db, selected, authFetch) {
+function setup(db, selected, authFetch, browserFetch) {
   return load('app/lib/offline.ts', {
     indexedDB: db.indexedDB, localStorage: storage(),
     window: { showDirectoryPicker: async () => selected },
+    fetch: browserFetch,
   }, {
     '@capacitor/core': { Capacitor: { isNativePlatform: () => false }, registerPlugin: () => ({}) },
     './auth': { getSessionUser: () => ({ id: 1, name: 'Test' }), authFetch },
@@ -258,4 +259,58 @@ test('Android sync receives the same new media and nested cover catalog', async 
   assert.deepEqual(Object.keys(updated.covers).sort(), Object.keys(covers).sort());
   assert.equal(calls[0][0], 'reconcile');
   assert.deepEqual(calls[1], ['download', 'test-token']);
+});
+
+test('saved desktop folder permission is restored without reopening the folder picker', async () => {
+  const root = folder('Original');
+  let granted = false, requests = 0;
+  root.queryPermission = async () => granted ? 'granted' : 'prompt';
+  root.requestPermission = async () => { granted = true; requests++; return 'granted'; };
+  const db = database({ settings: new Map([['directory', root]]) });
+  const offline = setup(db);
+  assert.equal((await offline.offlineLocation(true)).name, 'Original');
+  await offline.offlineLocation(true);
+  assert.equal(requests, 1);
+  assert.equal(db.stores.settings.get('directory'), root);
+});
+
+test('a rejected saved folder grant keeps the location instead of discarding it', async () => {
+  const root = folder('Original');
+  root.queryPermission = async () => 'denied';
+  root.requestPermission = async () => 'denied';
+  const db = database({ settings: new Map([['directory', root]]) });
+  await assert.rejects(setup(db).offlineLocation(true), /saved offline folder/);
+  assert.equal((await setup(db).offlineLocation()).configured, true);
+});
+
+test('opening offline artwork needs only a read grant, not renewed write permission', async () => {
+  const modes = [];
+  const root = {
+    name: 'Saved',
+    queryPermission: async ({ mode }) => { modes.push(mode); return mode === 'read' ? 'granted' : 'prompt'; },
+    requestPermission: async () => { throw new Error('Must not request write access to read art'); },
+    getDirectoryHandle: async () => root,
+    getFileHandle: async () => ({ getFile: async () => new Blob(['art'], { type: 'image/jpeg' }) }),
+  };
+  const art = { id: 'art', path: 'Library/Folder', name: 'cover.jpg', kind: 'image', relativePath: 'cover.jpg', localUri: 'cover.jpg' };
+  const bundle = { ...catalog(root, []), covers: { 'Library/Folder': art } };
+  const result = await setup(database({ bundles: new Map([['id', bundle]]) })).resolveOfflineFileUrl('id', 'art');
+  assert.deepEqual(modes, ['read']);
+  assert.match(result.url, /^blob:/);
+  URL.revokeObjectURL(result.url);
+});
+
+test('external poster downloads omit credentials and never use the authenticated server client', async () => {
+  const disk = downloadFolder();
+  const bundle = catalog(disk.root, []);
+  const db = database({ bundles: new Map([['id', bundle]]) });
+  const requests = [];
+  const offline = setup(db, undefined,
+    async () => { throw new Error('Must not send server credentials to poster host'); },
+    async (url, options) => { requests.push([url, options.credentials]); return new Response(new Uint8Array(4)); });
+  const updated = await offline.reconcileOfflineBundle(bundle, [], {
+    'Music/Sample Album': { ...track('cover'), kind: 'image', size: 0, public: true, url: 'https://posters.test/cover.jpg' },
+  });
+  assert.deepEqual(requests, [['https://posters.test/cover.jpg', 'omit']]);
+  assert.ok(updated.covers['Music/Sample Album'].localUri);
 });

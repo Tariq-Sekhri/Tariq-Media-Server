@@ -21,6 +21,11 @@ export const selectSeriesEpisode = <T extends { path?: string }>(ordered: T[], p
 };
 
 const storageKey = (userId: number) => `tms:watch-progress:${userId}`;
+let persistOnDevice: ((userId: number, path: string, state: WatchProgress) => void) | undefined;
+export const installWatchProgressPersistence = (persist: typeof persistOnDevice) => {
+  persistOnDevice = persist;
+  return () => { if (persistOnDevice === persist) persistOnDevice = undefined; };
+};
 
 export const readLocalWatchProgress = (userId?: number): Record<string, WatchProgress> => {
   if (userId === undefined || typeof window === "undefined") return {};
@@ -50,4 +55,16 @@ export const writeLocalWatchProgress = (userId: number | undefined, path: string
       .sort((left, right) => right[1].updated - left[1].updated).slice(0, 1000);
     window.localStorage.setItem(storageKey(userId), JSON.stringify(Object.fromEntries(entries)));
   } catch { /* Server persistence remains available when local storage is full. */ }
+  persistOnDevice?.(userId, path, state);
+};
+
+export const syncLocalWatchProgress = async (remote: Record<string, WatchProgress>, local: Record<string, WatchProgress>, save: (path: string, state: WatchProgress) => Promise<void>) => {
+  for (const [path, state] of Object.entries(local)) {
+    const saved = remote[path];
+    if (!savesWatchProgress(path) || (saved && (saved.updated > state.updated
+      || (saved.updated === state.updated && saved.position === state.position && saved.duration === state.duration && Boolean(saved.completed) === Boolean(state.completed))))) continue;
+    // Failed uploads leave the durable local record untouched for the next run.
+    await save(path, state);
+  }
+  return mergeWatchProgress(remote, local);
 };

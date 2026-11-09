@@ -80,12 +80,6 @@ public class TmsOfflinePlugin extends Plugin {
 
     @PluginMethod
     public synchronized void getLocation(PluginCall call) {
-        try {
-            forgetDeletedLocalTree();
-        } catch (Exception error) {
-            call.reject("Could not check the offline folder.", error);
-            return;
-        }
         String uri = preferences().getString(TREE_URI, "");
         JSObject result = new JSObject();
         // A backup restore brings back the saved folder URI but not its
@@ -93,6 +87,34 @@ public class TmsOfflinePlugin extends Plugin {
         result.put("configured", hasTreePermission(uri));
         result.put("name", preferences().getString(TREE_NAME, ""));
         call.resolve(result);
+    }
+
+    @PluginMethod
+    public synchronized void saveOfflineWatchProgress(PluginCall call) {
+        int ownerId = call.getInt("ownerId", 0);
+        String path = call.getString("path", "");
+        JSObject state = call.getObject("state");
+        if (ownerId == 0 || path.isEmpty() || state == null) { call.reject("Missing playback progress."); return; }
+        try {
+            String key = "offline_watch_progress_" + ownerId;
+            JSONObject playback = new JSONObject(preferences().getString(key, "{}"));
+            JSONObject previous = playback.optJSONObject(path);
+            if (previous == null || state.optLong("updated") >= previous.optLong("updated")) {
+                playback.put(path, new JSONObject(state.toString()));
+                preferences().edit().putString(key, playback.toString()).apply();
+            }
+            call.resolve();
+        } catch (Exception error) { call.reject("Could not save playback progress.", error); }
+    }
+
+    @PluginMethod
+    public void getOfflineWatchProgress(PluginCall call) {
+        int ownerId = call.getInt("ownerId", 0);
+        try {
+            JSObject result = new JSObject();
+            result.put("playback", new JSObject(preferences().getString("offline_watch_progress_" + ownerId, "{}")));
+            call.resolve(result);
+        } catch (Exception error) { call.reject("Could not read playback progress.", error); }
     }
 
     @PluginMethod
@@ -154,7 +176,6 @@ public class TmsOfflinePlugin extends Plugin {
     public synchronized void list(PluginCall call) {
         int ownerId = call.getInt("ownerId", 0);
         try {
-            forgetDeletedLocalTree();
             JSONArray stored = readManifest();
             String treeValue = preferences().getString(TREE_URI, "");
             boolean folderAvailable = hasTreePermission(treeValue);
@@ -214,6 +235,7 @@ public class TmsOfflinePlugin extends Plugin {
         }
         downloads.execute(() -> {
             JSONObject bundle = requested;
+            List<Uri> stagedDocuments = new ArrayList<>();
             try {
                 bundle = new JSONObject(requested.toString());
                 preferences().edit().putInt(LAST_OWNER_ID, bundle.optInt("ownerId", 0)).apply();
@@ -242,7 +264,12 @@ public class TmsOfflinePlugin extends Plugin {
                         if (!parts[part].isEmpty()) directory = findOrCreateDirectory(directory, safeSegment(parts[part]));
                     }
                     String filename = safeSegment(parts.length == 0 ? file.optString("name", "file") : parts[parts.length - 1]);
-                    Uri destination = findOrCreateFile(directory, mimeType(filename), filename);
+                    String destinationName = filename;
+                    if (bundle.optJSONObject("syncPreviousBundle") != null && findChild(directory, filename) != null) {
+                        destinationName = "sync-" + Integer.toHexString((file.optString("url") + file.optLong("size")).hashCode()) + "-" + filename;
+                    }
+                    Uri destination = findOrCreateFile(directory, mimeType(filename), destinationName);
+                    if (bundle.optJSONObject("syncPreviousBundle") != null) stagedDocuments.add(destination);
                     final long completedBytes = downloadedBytes;
                     final int currentFile = index + 1;
                     final String currentFileName = file.optString("name", filename);
@@ -263,7 +290,8 @@ public class TmsOfflinePlugin extends Plugin {
                 JSONObject cover = bundle.optJSONObject("cover");
                 if (cover != null && !savedDocumentExists(cover)) {
                     Uri destination = metadataCoverDestination(tree, bundle, cover);
-                    downloadedBytes += downloadTo(cover.getString("url"), token, destination, bytes -> {});
+                    if (bundle.optJSONObject("syncPreviousBundle") != null) stagedDocuments.add(destination);
+                    downloadedBytes += downloadTo(cover.getString("url"), cover.optBoolean("public", false) ? "" : token, destination, bytes -> {});
                     cover.put("localUri", destination.toString());
                     bundle.put("downloadedBytes", downloadedBytes);
                     upsertBundle(bundle);
@@ -275,7 +303,8 @@ public class TmsOfflinePlugin extends Plugin {
                         JSONObject folderCover = covers.getJSONObject(coverPaths.next());
                         if (savedDocumentExists(folderCover)) continue;
                         Uri destination = metadataCoverDestination(tree, bundle, folderCover);
-                        downloadedBytes += downloadTo(folderCover.getString("url"), token, destination, bytes -> {});
+                        if (bundle.optJSONObject("syncPreviousBundle") != null) stagedDocuments.add(destination);
+                        downloadedBytes += downloadTo(folderCover.getString("url"), folderCover.optBoolean("public", false) ? "" : token, destination, bytes -> {});
                         folderCover.put("localUri", destination.toString());
                         bundle.put("downloadedBytes", downloadedBytes);
                         upsertBundle(bundle);
@@ -291,16 +320,31 @@ public class TmsOfflinePlugin extends Plugin {
                 bundle.remove("downloadSpeedBytes");
                 bundle.remove("etaSeconds");
                 bundle.remove("error");
+                JSONObject previous = bundle.optJSONObject("syncPreviousBundle");
+                bundle.remove("syncPreviousBundle");
                 upsertBundle(bundle);
                 persistFolderCatalog();
+                if (previous != null) {
+                    Set<String> retained = new HashSet<>(bundleDocumentUris(bundle));
+                    for (String uri : bundleDocumentUris(previous)) {
+                        if (!retained.contains(uri)) try { deleteDocumentStrict(Uri.parse(uri)); } catch (Exception ignored) { }
+                    }
+                }
                 JSObject result = new JSObject();
                 result.put("bundle", persistedBundle(bundle));
                 call.resolve(result);
             } catch (Exception error) {
                 android.util.Log.e("TmsOffline", "Offline download failed for " + bundleId, error);
                 try {
-                    // Preserve completed file URIs and byte progress for a retry.
-                    bundle.put("status", "error");
+                    // A failed resync leaves the previous complete catalog usable.
+                    JSONObject previous = bundle.optJSONObject("syncPreviousBundle");
+                    if (previous != null) {
+                        Set<String> retained = new HashSet<>(bundleDocumentUris(previous));
+                        for (Uri staged : stagedDocuments) {
+                            if (!retained.contains(staged.toString())) try { deleteDocumentStrict(staged); } catch (Exception ignored) { }
+                        }
+                        bundle = previous;
+                    } else bundle.put("status", "error");
                     bundle.put("error", error.getMessage() == null ? "Offline download failed" : error.getMessage());
                     upsertBundle(bundle);
                     persistFolderCatalog();
@@ -381,11 +425,6 @@ public class TmsOfflinePlugin extends Plugin {
                     retainedUris.add(old.optString("localUri"));
                 }
             }
-            for (JSONObject old : oldFileList) {
-                String localUri = old.optString("localUri", "");
-                if (retainedUris.contains(localUri)) continue;
-                if (!localUri.isEmpty()) try { DocumentsContract.deleteDocument(getContext().getContentResolver(), Uri.parse(localUri)); } catch (Exception ignored) {}
-            }
             JSONObject oldCovers = existing.optJSONObject("covers");
             JSONObject nextCovers = next.optJSONObject("covers");
             if (oldCovers != null && nextCovers != null) {
@@ -400,11 +439,10 @@ public class TmsOfflinePlugin extends Plugin {
                 }
             }
             next.put("status", "ready");
+            next.put("syncPreviousBundle", new JSONObject(existing.toString()));
             next.put("updatedAt", System.currentTimeMillis());
-            upsertBundle(next);
-            persistFolderCatalog();
             JSObject result = new JSObject();
-            result.put("bundle", persistedBundle(next));
+            result.put("bundle", new JSObject(next.toString()));
             call.resolve(result);
         } catch (Exception error) {
             call.reject("Could not reconcile the offline bundle.", error);
@@ -709,33 +747,9 @@ public class TmsOfflinePlugin extends Plugin {
         return false;
     }
 
-    /** Only forget a confirmed deleted folder on mounted primary storage.
-     * A detached SD card, cloud provider outage, or lost grant is recoverable.
-     */
-    private synchronized void forgetDeletedLocalTree() throws Exception {
-        String value = preferences().getString(TREE_URI, "");
-        if (!activeDownloads.isEmpty() || !hasTreePermission(value)) return;
-        Uri tree = Uri.parse(value);
-        if (!"com.android.externalstorage.documents".equals(tree.getAuthority())
-            || !DocumentsContract.getTreeDocumentId(tree).startsWith("primary:")
-            || !android.os.Environment.MEDIA_MOUNTED.equals(android.os.Environment.getExternalStorageState())) return;
-        boolean missing;
-        try (Cursor cursor = getContext().getContentResolver().query(documentUri(tree),
-            new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID}, null, null, null)) {
-            // ExternalStorageProvider returns null for a missing primary document.
-            missing = cursor == null || !cursor.moveToFirst();
-        } catch (RuntimeException unavailable) {
-            android.util.Log.w("TmsOffline", "Could not check the offline folder", unavailable);
-            return;
-        }
-        if (!missing) return;
-        writeManifest(new JSONArray());
-        preferences().edit().remove(TREE_URI).remove(TREE_NAME).remove(METADATA_LAYOUT_TREE).commit();
-        try {
-            getContext().getContentResolver().releasePersistableUriPermission(tree,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-        } catch (SecurityException ignored) { }
-    }
+    // Keep the selected tree and catalog even if its provider temporarily
+    // returns no rows (unmounted storage, startup, or a provider outage).
+    // Only an explicit location change/removal may discard saved access.
 
     private static final class IndexedDocument {
         final String uri;
@@ -1050,7 +1064,9 @@ public class TmsOfflinePlugin extends Plugin {
     private Uri metadataCoverDestination(Uri tree, JSONObject bundle, JSONObject cover) throws Exception {
         Uri root = findOrCreateDirectory(tree, METADATA_ROOT);
         Uri folder = findOrCreateDirectory(root, safeSegment(bundle.getString("id")));
-        return findOrCreateFile(folder, mimeType(cover.optString("name", "folder-cover.jpg")), safeSegment(cover.optString("relativePath", "folder-cover.jpg")));
+        String name = safeSegment(cover.optString("relativePath", "folder-cover.jpg"));
+        if (bundle.optJSONObject("syncPreviousBundle") != null) name = "sync-" + Integer.toHexString(cover.optString("url").hashCode()) + "-" + name;
+        return findOrCreateFile(folder, mimeType(cover.optString("name", "folder-cover.jpg")), name);
     }
 
     private Set<String> migrateCovers(Uri tree, JSONArray manifest) throws Exception {
@@ -1257,6 +1273,7 @@ public class TmsOfflinePlugin extends Plugin {
     }
 
     private synchronized void upsertBundle(JSONObject bundle) throws Exception {
+        if (bundle.optJSONObject("syncPreviousBundle") != null && "downloading".equals(bundle.optString("status"))) return;
         JSONArray stored = readManifest();
         JSONArray next = new JSONArray();
         boolean replaced = false;

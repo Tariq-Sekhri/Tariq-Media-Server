@@ -66,3 +66,36 @@ test('libraries save progress unless their start-fresh toggle is on', () => {
   const on = load(path.join(__dirname, '../app/lib/watch-progress.ts'), { window: { localStorage: saved } }, { './library-playback': libraryPlayback({ sleep: { startFresh: true } }) });
   assert.equal(on.readLocalWatchProgress(7)['Sleep/a.mp3'], undefined);
 });
+
+test('offline progress uploads while newer progress from another device wins', async () => {
+  const remote = { 'Library/newer.mp4': { position: 80, duration: 100, updated: 20 } };
+  const local = {
+    'Library/newer.mp4': { position: 30, duration: 100, updated: 10 },
+    'Library/local.mp4': { position: 60, duration: 100, updated: 30 },
+  };
+  const sent = [];
+  const merged = await progress.syncLocalWatchProgress(remote, local, async (path, value) => sent.push([path, value]));
+  assert.deepEqual(sent.map(([path]) => path), ['Library/local.mp4']);
+  assert.equal(merged['Library/newer.mp4'].position, 80);
+  assert.equal(merged['Library/local.mp4'].position, 60);
+});
+
+test('failed progress uploads preserve local progress for retry', async () => {
+  const local = { 'Library/local.mp4': { position: 60, duration: 100, updated: 30 } };
+  await assert.rejects(progress.syncLocalWatchProgress({}, local, async () => { throw new Error('Disconnected'); }), /Disconnected/);
+  assert.equal(local['Library/local.mp4'].position, 60);
+  const sent = [];
+  await progress.syncLocalWatchProgress({}, local, async path => sent.push(path));
+  assert.deepEqual(sent, ['Library/local.mp4']);
+});
+
+test('a same-second offline edit is uploaded once instead of remaining local forever', async () => {
+  const remote = { 'Library/video.mp4': { position: 40, duration: 100, updated: 20 } };
+  const local = { 'Library/video.mp4': { position: 60, duration: 100, updated: 20 } };
+  let sends = 0;
+  const save = async (path, state) => { sends++; remote[path] = { ...state }; };
+  await progress.syncLocalWatchProgress(remote, local, save);
+  await progress.syncLocalWatchProgress(remote, local, save);
+  assert.equal(sends, 1);
+  assert.equal(remote['Library/video.mp4'].position, 60);
+});

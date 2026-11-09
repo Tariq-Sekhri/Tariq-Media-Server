@@ -50,9 +50,7 @@ const OFFLINE_DIFFERENCES = [
   { file: 'app/page.tsx', match: '{playlistsOffline', count: 1, reason: 'An empty offline playlist explains that only downloads appear.' },
   { file: 'app/page.tsx', match: ': backendState === "offline"', exact: true, count: 1, reason: 'Shows the server error for empty server sections.' },
   // Connection badge and Offline tools.
-  { file: 'app/page.tsx', match: 'title={backendState === "offline" ? backendError || "Server unavailable" : undefined}>', count: 1, reason: 'Connection badge.' },
   { file: 'app/page.tsx', match: '{backendState === "online" ? <><path', count: 1, reason: 'Connection badge icon.' },
-  { file: 'app/page.tsx', match: '{backendState === "online" ? "Server connected" : backendState === "offline" ? "Server offline" : "Connecting…"}', count: 1, reason: 'Connection badge label.' },
   { file: 'app/page.tsx', match: 'onClick={() => void syncOfflineFolders()} disabled={offlineBusy || backendState !== "online"}>', count: 1, reason: 'Syncing downloads needs the server.' },
   { file: 'app/page.tsx', match: '{backendState === "offline" && (', count: 1, reason: 'Try server button.' },
   { file: 'app/page.tsx', match: 'section === "discover" || backendState === "online") && (', count: 1, reason: 'The item count appears once connected; the badge owns other states.' },
@@ -62,10 +60,9 @@ const OFFLINE_DIFFERENCES = [
   { file: 'app/page.tsx', match: 'disabled={isDownloaded}', count: 3, reason: 'Home screen shortcuts and server downloads need the server file.' },
   { file: 'app/page.tsx', match: 'disabled={isDownloaded || offlineBusy}', count: 1, reason: 'Already available offline.' },
   { file: 'app/page.tsx', match: '{isDownloaded || offlineBundles.some(', count: 1, reason: 'Make available offline label.' },
-  { file: 'app/page.tsx', match: 'isDownloaded) && (', count: 6, reason: 'Move, rename, delete, new folder, upload and download change server files: shown, disabled.' },
+  { file: 'app/page.tsx', match: 'isDownloaded) && (', count: 3, reason: 'Move, rename, delete, new folder, upload and download change server files: shown, disabled.' },
   { file: 'app/page.tsx', match: '{(item.kind !== "folder" && (canDeleteItem(item) || isDownloaded)) && (', exact: true, count: 1, reason: 'Delete changes server files: shown, disabled.' },
-  { file: 'app/page.tsx', match: 'disabled={isDownloaded || !can', count: 7, reason: 'Server file actions are disabled for downloaded copies.' },
-  { file: 'app/page.tsx', match: '!isDownloaded && (', count: 2, reason: 'Library settings manage server libraries.' },
+  { file: 'app/page.tsx', match: 'disabled={isDownloaded || !can', count: 4, reason: 'Server file actions are disabled for downloaded copies.' },
   { file: 'app/page.tsx', match: '{!item.trashed && !isDownloaded && !isLibrary && !canDeleteItem(item)', count: 1, reason: 'Delete requests go to server administrators.' },
   { file: 'app/page.tsx', match: 'const isLibrary = item.kind === "folder" && !item.parent && !isDownloaded;', count: 1, reason: 'A downloaded root folder is not a server library.' },
   { file: 'app/page.tsx', match: 'const isLibrary = item.kind === "folder" && !item.parent && !item.offline;', count: 1, reason: 'A downloaded root folder is not a server library.' },
@@ -81,6 +78,8 @@ const OFFLINE_DIFFERENCES = [
   { file: 'app/page.tsx', match: 'candidate.id === item.offline!.', count: 2, reason: 'Resolves the local file to open.' },
   { file: 'app/page.tsx', match: 'if (item.offline && item.path) {', count: 1, reason: 'Durations of downloads are kept locally.' },
   { file: 'app/page.tsx', match: 'if (item.offline || section === "offline" || pathIsDownloaded(path)) {', count: 1, reason: 'Favorites of downloads are queued when the server is unavailable.' },
+  { file: 'app/page.tsx', match: 'const coverImage = item.offline && item.previewKind === "image" && item.previewSrc', count: 1, reason: 'Downloaded folders use their saved copy of the original artwork instead of requesting the online poster.' },
+  { file: 'app/page.tsx', match: 'aria-label={backendState === "online" ? "Server connected"', count: 1, reason: 'Connection badge exposes its current state to assistive technology.' },
   // Watch and the mini player play the local file.
   { file: 'app/watch/page.tsx', match: 'if (details.offline) return;', count: 1, reason: 'Activity is reported to the server only for streamed media.' },
   { file: 'app/watch/page.tsx', match: 'if (details.offline && details.customQueue) {', count: 1, reason: 'Restores a queue of local files.' },
@@ -225,8 +224,9 @@ test('tagging and playlist management use the offline queue when the server is u
   assert.doesNotMatch(body(page, 'saveOrganization'), /kind !== "folder" && pathIsDownloaded/, 'downloaded folders can be tagged offline');
   assert.doesNotMatch(body(page, 'startOrganizing'), /offline/, 'Tags & playlists opens for downloads');
   assert.match(page, /\{!item\.trashed && item\.path && \(\s*<button onClick=\{\(\) => startOrganizing\(item\)\}>/, 'the item menu offers Tags & playlists for downloads');
-  assert.match(page, /if \(backendState !== "online"\) return;\s*let cancelled = false;\s*void syncPendingOfflineOrganization\(\)/, 'queued changes sync when the server returns');
-  assert.match(page, /void hydratePendingOfflineChanges\(\)\.then\(\(\) => readOfflineUserState/, 'the offline shell shows changes queued in the other origin');
+  assert.match(page, /await syncPendingOfflineOrganization\(\)/, 'queued changes sync when the server returns');
+  assert.match(page, /window\.setInterval\(refresh, 15_000\)/, 'metadata retries while connected without a page refresh');
+  assert.match(page, /hydratePendingOfflineChanges\(\)\.then\(\(\) => readOfflineUserState/, 'the offline shell shows changes queued in the other origin');
 
   // The rail keeps Playlists and Tags offline; only the library tree needs the server.
   const gate = page.indexOf('{backendState !== "offline" && <>');
