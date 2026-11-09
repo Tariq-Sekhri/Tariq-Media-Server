@@ -239,7 +239,7 @@ const formatCreatedDate = (timestamp: number) => timestamp
   : "Unknown";
 const logValue = (line: string, key: string) => line.match(new RegExp(`(?:^|\\s)${key}=([^\\s]+)`))?.[1];
 
-export default function AdminDashboard() {
+export default function AdminDashboard({ embedded = false }: { embedded?: boolean } = {}) {
   const appConfirm = useAppConfirm();
   const currentUser = useMemo(() => getSessionUser(), []);
   const canViewUsers = hasAdminPermission(currentUser, "view_users");
@@ -1170,9 +1170,10 @@ export default function AdminDashboard() {
             {section === "libraries" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={() => setShowCreateLibrary(true)}>Create library</button>}
             {section !== "processes" && section !== "trash" && <button type="button" aria-label={loading ? "Refreshing" : "Refresh"} onClick={() => void refresh()} disabled={loading || clearingMetrics}><MenuIcon name="restore" />{loading ? "Refreshing" : "Refresh"}</button>}
   </>;
-  return <main className="admin-shell">
-    <MobileNavigation active="admin" admin={true} />
-    <header className="admin-app-header">
+  const Root = embedded ? "div" : "main";
+  return <Root className={`admin-shell${embedded ? " admin-embedded" : ""}`}>
+    {!embedded && <MobileNavigation active="admin" admin={true} />}
+    {!embedded && <header className="admin-app-header">
       <a className="admin-brand" href="/?section=library" aria-label="TMS Libraries"><span className="logo-badge" aria-hidden="true" /><strong>TMS</strong></a><b className="admin-app-title">Admin</b>
       <nav className="admin-app-nav" aria-label="Main navigation">
         {mainNavigation.map((item) => <a key={item.id} href={`/?section=${item.id}`}><i aria-hidden="true">{item.icon}</i>{item.label}</a>)}
@@ -1187,7 +1188,7 @@ export default function AdminDashboard() {
           <button type="button" onClick={() => void logOut().then(() => window.location.replace("/login"))}>Log out</button>
         </div>}
       </div>
-    </header>
+    </header>}
     <aside className="admin-sidebar">
       <nav aria-label="Administration sections">
         {currentUser?.is_admin && (
@@ -1984,5 +1985,5 @@ export default function AdminDashboard() {
       <p>Removing a device ends that session immediately. {sessionUser.is_admin ? "This account is an administrator." : ""}</p>
       {loadingSessions ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading devices</b></div> : <div className="settings-session-list admin-session-list">{userSessions.length ? userSessions.map((session) => <div className="settings-session-row" key={session.token}><div className="settings-session-icon">◉</div><div><b>{session.device}</b><small>Signed in {formatCreatedDate(session.created_at)}{session.ip_address ? ` · ${session.ip_address}` : ""}</small><small className="settings-user-agent">{session.user_agent || "Device details unavailable"}</small></div><button className="danger" disabled={Boolean(revokingSession)} onClick={() => void revokeUserSession(session)}>{revokingSession === session.token ? "Logging out…" : "Log out device"}</button></div>) : <div className="admin-panel-empty"><b>No active devices</b></div>}</div>}
     </section></div>}
-  </main>;
+  </Root>;
 }

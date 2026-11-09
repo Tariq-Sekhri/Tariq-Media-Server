@@ -30,7 +30,8 @@ import MagnetDownloader from "./MagnetDownloader";
 import ServerDownloadDialog, { type YtDlpJob } from "./ServerDownloadDialog";
 import TagInput from "./TagInput";
 import { usePlaybackSession } from "./PlaybackProvider";
-import { navigateApp } from "./lib/app-shell";
+import { navigateApp, syncAppShell, useAppShell } from "./lib/app-shell";
+import AdminDashboard from "./admin/page";
 import { startPlaybackSession, playbackSessionSnapshot, setPlaybackSession } from "./lib/playback-session";
 import { hydrateNativeWatchProgress } from "./lib/native-watch-progress";
 import { mergeWatchProgress, readLocalWatchProgress, savesWatchProgress, syncLocalWatchProgress, writeLocalWatchProgress } from "./lib/watch-progress";
@@ -1515,6 +1516,9 @@ export default function Home() {
   const loadMoreInFlightRef = useRef(false);
   const urlStateReady = useRef(false);
   const restoringHistory = useRef(false);
+  const firstUrlSync = useRef(true);
+  const shellPath = useAppShell().path;
+  const adminRoute = new URL(shellPath || "/", "http://tms.local").pathname === "/admin";
   const metadataLoading = useRef(new Set<string>());
   const [pendingTitleMetadata, setPendingTitleMetadata] = useState<Set<string>>(() => new Set());
   const trailerMetadataRefresh = useRef(new Set<string>());
@@ -2369,6 +2373,8 @@ export default function Home() {
 
   useEffect(() => {
     const restoreFromUrl = () => {
+      // Admin renders inside this page and owns its own URL state.
+      if (window.location.pathname === "/admin") return;
       restoringHistory.current = true;
       const params = new URLSearchParams(window.location.search);
       const nextQuery = params.get("q") ?? "";
@@ -2472,6 +2478,12 @@ export default function Home() {
 
   useEffect(() => {
     if (!urlStateReady.current) return;
+    // Opening /admin directly must not rewrite its URL on mount; later
+    // library navigation from Admin does leave it.
+    if (firstUrlSync.current) {
+      firstUrlSync.current = false;
+      if (window.location.pathname === "/admin") return;
+    }
     if (restoringHistory.current) {
       restoringHistory.current = false;
       return;
@@ -2497,7 +2509,10 @@ export default function Home() {
     const queryString = params.toString();
     const nextUrl = `${activeSearch.trim() ? "/search" : "/"}${queryString ? `?${queryString}` : ""}`;
     const currentUrl = `${window.location.pathname}${window.location.search}`;
-    if (nextUrl !== currentUrl) window.history.pushState(null, "", nextUrl);
+    if (nextUrl !== currentUrl) {
+      window.history.pushState(null, "", nextUrl);
+      syncAppShell();
+    }
   }, [activePlaylistId, activeSearch, activeTags, currentFolder, section, sort, sortDirection]);
 
   useEffect(() => {
@@ -6224,7 +6239,7 @@ export default function Home() {
 
   return (
     <main
-      className={`app-shell concept-hub unified-layout section-${section} ${activeSearch ? "aggregate-results" : ""} ${railCollapsed ? "rail-collapsed" : ""} ${railDrawerOpen ? "rail-drawer-open" : ""} ${railDrawerOpen || railDrawerVisible ? "rail-drawer-visible" : ""} ${!railDrawerOpen && railDrawerVisible ? "rail-drawer-closing" : ""} ${section === "notes" ? "notes-section" : ""}`}
+      className={`app-shell concept-hub unified-layout ${adminRoute ? "section-admin" : `section-${section}`} ${activeSearch ? "aggregate-results" : ""} ${railCollapsed ? "rail-collapsed" : ""} ${railDrawerOpen ? "rail-drawer-open" : ""} ${railDrawerOpen || railDrawerVisible ? "rail-drawer-visible" : ""} ${!railDrawerOpen && railDrawerVisible ? "rail-drawer-closing" : ""} ${section === "notes" ? "notes-section" : ""}`}
       onTouchStart={(event) => {
         // Player gestures and horizontal tag scrolling own their touches.
         if (event.target instanceof Element && event.target.closest(".miniplayer, .tag-strip")) {
@@ -6300,7 +6315,8 @@ export default function Home() {
           selectUploadFiles(Array.from(event.target.files ?? []).map((file) => ({ file })))
         }
       />
-      <MobileNavigation active={section === "trash" ? "admin" : section} admin={canOpenAdminPanel} online={backendState !== "offline"} onNavigate={(nextSection) => {
+      <MobileNavigation active={adminRoute || section === "trash" ? "admin" : section} admin={canOpenAdminPanel} online={backendState !== "offline"} onNavigate={(nextSection) => {
+        if (adminRoute) { navigateApp(`/?section=${nextSection}`); return; }
         setSection(nextSection);
         if (nextSection === "library" || nextSection === "offline") restoreFolderBrowsePrefs(null);
         setCurrentFolder(null); clearSearch();
@@ -6314,6 +6330,7 @@ export default function Home() {
             className="logo"
             aria-label="TMS — Tariq’s Media Server"
             onClick={() => {
+              if (adminRoute) { navigateApp("/?section=library"); return; }
               setSection("library");
               restoreFolderBrowsePrefs(null);
               setCurrentFolder(null);
@@ -6328,11 +6345,12 @@ export default function Home() {
         <nav aria-label="Main navigation">
           {nav.filter((item) => item.id === "offline" || backendState !== "offline").map((item) => (
             <a href={`/?section=${item.id}`} key={item.id}
-                className={section === item.id ? "active" : ""}
-                aria-current={section === item.id ? "page" : undefined}
+                className={!adminRoute && section === item.id ? "active" : ""}
+                aria-current={!adminRoute && section === item.id ? "page" : undefined}
                 onClick={(event) => {
                   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                   event.preventDefault();
+                  if (adminRoute) { navigateApp(`/?section=${item.id}`); return; }
                   const nextSection = item.id;
                   setSection(nextSection);
                   if (nextSection === "library" || nextSection === "offline") {
@@ -6349,7 +6367,7 @@ export default function Home() {
             </a>
           ))}
           {backendState !== "offline" && canOpenAdminPanel && (
-            <a href={sessionUser?.is_admin ? "/admin?section=notifications" : "/admin"}>
+            <a href={sessionUser?.is_admin ? "/admin?section=notifications" : "/admin"} className={adminRoute ? "active" : ""} aria-current={adminRoute ? "page" : undefined}>
                 <i>▦</i>Admin
                 {sessionUser?.is_admin && pendingAdminNotifications > 0 && <em>{pendingAdminNotifications}</em>}
             </a>
@@ -6596,7 +6614,7 @@ export default function Home() {
         </header>
       </aside>
 
-      <section className="workspace">
+      {adminRoute ? <section className="workspace workspace-admin"><AdminDashboard embedded /></section> : <section className="workspace">
 
         <div className="content">
           {(railDrawerOpen || railDrawerVisible) && (
@@ -8104,7 +8122,7 @@ export default function Home() {
             </div>
           )}
         </div>
-      </section>
+      </section>}
 
       {renderItemContextMenu()}
       {sidebarContext && (

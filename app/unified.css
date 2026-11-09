@@ -7336,3 +7336,6 @@ thead .lib-tabs-person { background: #12171b; }
 }
 .admin-page-header-actions .admin-metrics-device { min-height: 33px; border: 1px solid #2d343a; border-radius: 8px; padding: 0 10px; background: #13171b; color: #d5dade; font: inherit; font-size: 13px; color-scheme: dark; }
 @media (pointer: coarse) { .admin-page-header-actions .admin-metrics-device { min-height: 48px; font-size: 15px; } }
+
+/* Admin inside the shared TMS header: the workspace already clears the header. */
+.admin-shell.admin-embedded { min-height: 0; padding-top: 0; padding-bottom: 0; background: transparent; }
