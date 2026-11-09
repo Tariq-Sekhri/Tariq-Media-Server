@@ -1163,6 +1163,9 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
   </section>;
   const metricDeviceClasses = section === "metrics" ? [...new Set(metricsLogs.lines.map((line) => performanceDetails(line)?.device_class).filter((value): value is string => typeof value === "string"))].sort() : [];
   const headerActions = <>
+            {section === "processes" && <button type="button" className="admin-primary-action" disabled={refreshingJobs} onClick={() => void refreshAdminJobs()}>
+              {refreshingJobs ? "Refreshing…" : "Refresh work"}
+            </button>}
             {section === "metrics" && <select className="admin-metrics-device" aria-label="Device" value={metricDeviceFilter} onChange={(event) => setMetricDeviceFilter(event.target.value)}><option value="all">All devices</option>{metricDeviceClasses.map((device) => <option value={device} key={device}>{device[0].toUpperCase() + device.slice(1)}</option>)}</select>}
             {section === "users" && canCreateUsers && <button className="admin-primary-action" type="button" onClick={() => setShowAddUser(true)}>＋ Add user</button>}
             {section === "metrics" && currentUser?.is_admin && <button type="button" className="admin-clear-metrics-action" disabled={loading || clearingMetrics} onClick={() => void clearMetrics()}>{clearingMetrics ? "Wiping…" : "Wipe all metrics"}</button>}
@@ -1533,9 +1536,6 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
               <p>LIVE QUEUE</p>
               <h2>{processes.filter((process) => isActiveWork(process.status)).length} active · {processes.filter((process) => !isActiveWork(process.status) && !isFinishedWork(process.status)).length} waiting / inactive · {processes.filter((process) => needsWorkAttention(process.status)).length} need attention</h2>
             </div>
-            <button type="button" className="admin-primary-action" disabled={refreshingJobs} onClick={() => void refreshAdminJobs()}>
-              {refreshingJobs ? "Refreshing…" : "Refresh work"}
-            </button>
           </header>
           <div className="admin-work-feedback" aria-live="polite">
             {(processRefreshError || (processUpdatedAt !== null && processClock - processUpdatedAt > 15_000)) && <strong role="status">{processRefreshError || "Live status is delayed"}. Displayed work may be outdated.</strong>}
