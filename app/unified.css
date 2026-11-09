@@ -7342,7 +7342,16 @@ thead .lib-tabs-person { background: #12171b; }
 .admin-shell.admin-embedded { min-height: 0; padding-top: 0; padding-bottom: 0; background: transparent; }
 .admin-embedded .admin-workspace:has(> .admin-processes-workspace) { padding-top: 0; }
 .admin-workspace .admin-processes-surface.admin-section-surface { margin-top: 0 !important; }
-.admin-workspace .admin-processes-surface > header { padding-top: 10px !important; }
+.admin-workspace .admin-processes-surface > header { padding-top: 10px !important; flex-wrap: wrap; }
+.admin-processes-surface > header > .admin-finished-work-toggle { display: inline-flex; flex-shrink: 0; align-items: center; gap: 10px; min-height: 38px; padding: 7px 11px; color: #d2d8df; font-size: 14px; }
+.admin-finished-work-state { min-width: 22px; font-weight: 700; }
+.admin-finished-work-track { position: relative; width: 32px; height: 18px; flex: none; border: 1px solid #737d8b; border-radius: 10px; background: #353e49; }
+.admin-finished-work-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #d9dfe7; transition: transform 120ms ease; }
+.admin-processes-surface > header > .admin-finished-work-toggle[aria-checked="true"] { border-color: #a18cf5; background: #32294a; color: #f0eaff; }
+.admin-finished-work-toggle[aria-checked="true"] .admin-finished-work-track { border-color: #ac97ff; background: #7864e7; }
+.admin-finished-work-toggle[aria-checked="true"] .admin-finished-work-track::after { transform: translateX(14px); background: #fff; }
+.admin-finished-work-toggle:focus-visible { outline: 2px solid #c3b3ff; outline-offset: 3px; }
+@media (pointer: coarse) { .admin-processes-surface > header > .admin-finished-work-toggle { min-height: 48px; } }
 .admin-workspace .admin-metrics-surface.admin-section-surface { margin-top: 4px !important; }
 .admin-insights { display: grid; gap: 14px; padding-top: 14px; }
 .admin-insight-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
