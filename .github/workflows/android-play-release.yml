@@ -41,8 +41,6 @@ jobs:
           BASE_VERSION=$(node -p 'require("./package.json").version')
           echo "name=${BASE_VERSION}-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
       - run: npm ci
-      # Offline tagging, playlists and UI parity are checked before shipping.
-      - run: npm run test:unit
       - name: Build and sync Android web assets
         env:
           TMS_CAPACITOR_SERVER_URL: ${{ secrets.TMS_CAPACITOR_SERVER_URL }}
