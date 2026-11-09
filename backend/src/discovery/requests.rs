@@ -10,10 +10,6 @@ pub struct Permission {
     pub auto_approve_requests: bool,
     pub weekly_limit: u32,
 }
-#[derive(Default, Deserialize, Serialize)]
-pub struct Policy {
-    pub members: Vec<Permission>,
-}
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Request {
     pub id: String,
@@ -154,38 +150,26 @@ pub async fn access(
     user: &StoredUser,
 ) -> Result<Vec<Permission>, (StatusCode, Json<Value>)> {
     let libraries = read_libraries(state).await;
-    let policy: Policy = load(state, "discovery-policy.json").await?;
-    Ok(libraries
-        .iter()
-        .filter(|(_, l)| l.content_type == "movies_tv" && !l.folder_structure_static)
-        .map(|(name, _)| name.clone())
-        .map(|name| {
-            if user.is_admin {
-                Permission {
-                    user_id: user.id,
-                    library: name,
-                    can_request: true,
-                    auto_approve_requests: true,
-                    weekly_limit: 0,
-                }
-            } else {
-                policy
-                    .members
-                    .iter()
-                    .find(|p| p.user_id == user.id && p.library == name)
-                    .cloned()
-                    .unwrap_or(Permission {
-                        user_id: user.id,
-                        library: name,
-                        ..Permission::default()
-                    })
-            }
-        })
-        // A library the user can neither view nor request into must not be
-        // named to them at all.
-        .filter(|permission| permission.can_request || visible(user, &libraries, &permission.library))
-        .collect())
+    Ok(library_access(user, &libraries))
 }
+
+fn library_access(user: &StoredUser, libraries: &BTreeMap<String, LibraryConfig>) -> Vec<Permission> {
+    libraries
+        .iter()
+        .filter(|(name, l)| l.content_type == "movies_tv" && !l.folder_structure_static
+            && visible(user, libraries, name))
+        .map(|(name, library)| Permission {
+            user_id: user.id,
+            library: name.clone(),
+            can_request: user.is_admin || library.members.iter().any(|member|
+                member.can_download && member.name.eq_ignore_ascii_case(&user.name)),
+            auto_approve_requests: user.is_admin,
+            // Retained in the response for older clients. Storage quota is the limit.
+            weekly_limit: 0,
+        })
+        .collect()
+}
+
 pub async fn destination(
     state: &AppState,
     user: &StoredUser,
@@ -217,38 +201,6 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/discover/requests", get(list).post(create))
         .route("/api/discover/requests/{id}", post(action))
-        .route("/api/discover/policy", get(policy).put(save_policy))
-}
-async fn policy(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Value> {
-    admin(&state, &headers).await?;
-    let policy: Policy = load(&state, "discovery-policy.json").await?;
-    let users: Vec<_> = read_users(&state.users_path)
-        .await
-        .into_iter()
-        .map(|u| json!({"id":u.id,"name":u.name}))
-        .collect();
-    Ok(Json(json!({"members":policy.members,"users":users})))
-}
-async fn save_policy(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(policy): Json<Policy>,
-) -> ApiResult<Value> {
-    admin(&state, &headers).await?;
-    let mut seen = BTreeSet::new();
-    for p in &policy.members {
-        if !seen.insert((p.user_id, p.library.clone())) {
-            return Err(error(
-                StatusCode::BAD_REQUEST,
-                "Duplicate library permission.",
-            ));
-        }
-    }
-    let _guard = state.discovery_lock.lock().await;
-    write_persisted_json(&data_path(&state, "discovery-policy.json"), &policy)
-        .await
-        .map_err(internal)?;
-    Ok(Json(json!({"saved":true})))
 }
 async fn list(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Value> {
     let user = user(&state, &headers).await?;
@@ -316,7 +268,7 @@ async fn create(
         .ok_or_else(|| {
             error(
                 StatusCode::FORBIDDEN,
-                "You do not have request permission for this library.",
+                "You do not have permission to download into this library.",
             )
         })?;
     if input.kind == "tv" && input.seasons.is_empty() {
@@ -377,26 +329,7 @@ async fn create(
         }
     }
     let mut queue: Queue = load(&state, "discovery-requests.json").await?;
-    let new_count = targets
-        .iter()
-        .filter(|(s, _, _)| {
-            !queue
-                .requests
-                .iter()
-                .any(|r| same_target(r, &input.kind, input.tmdb_id, &input.library, *s) && r.subscription_id.is_none())
-        })
-        .count();
-    let recent = queue
-        .requests
-        .iter()
-        .filter(|r| r.owner_id == user.id && r.created_at > unix_now().saturating_sub(7 * 86400))
-        .count();
-    if permission.weekly_limit > 0 && recent + new_count > permission.weekly_limit as usize {
-        return Err(error(
-            StatusCode::CONFLICT,
-            "Your weekly movie/season request limit has been reached.",
-        ));
-    }
+    let mut new_count = 0;
     let mut ids = vec![];
     let all_series_seasons: BTreeSet<_> = detail["seasons"].as_array().into_iter().flatten()
         .filter_map(|s| s["season_number"].as_u64().and_then(|n| u16::try_from(n).ok()))
@@ -428,6 +361,7 @@ async fn create(
         automatic += usize::from(auto_download);
         follow |= approved && input.kind == "tv";
         ids.push(id.clone());
+        new_count += 1;
         queue.requests.push(Request {
             id,
             kind: input.kind.clone(),
@@ -882,6 +816,38 @@ async fn reconcile_manual(state: &AppState) -> Result<(), (StatusCode, Json<Valu
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn discover_uses_library_download_access_without_a_separate_policy() {
+        let mut user: StoredUser = serde_json::from_value(json!({
+            "id": 42, "name": "Member", "password_hash": null, "created_at": 0
+        })).unwrap();
+        let mut libraries: BTreeMap<String, LibraryConfig> = serde_json::from_value(json!({
+            "Movies": {"content_type": "movies_tv", "members": [
+                {"name": "member", "can_view": true, "can_download": true}
+            ]},
+            "View only": {"content_type": "movies_tv", "members": [
+                {"name": "Member", "can_view": true}
+            ]},
+            "Hidden": {"content_type": "movies_tv", "members": [
+                {"name": "Member", "can_view": false, "can_download": true}
+            ]},
+            "Static": {"content_type": "movies_tv", "folder_structure_static": true},
+            "Music": {"content_type": "music"}
+        })).unwrap();
+        let access = library_access(&user, &libraries);
+        assert_eq!(access.len(), 2);
+        let movies = access.iter().find(|p| p.library == "Movies").unwrap();
+        assert!(movies.can_request);
+        assert_eq!(movies.weekly_limit, 0);
+        assert!(!access.iter().find(|p| p.library == "View only").unwrap().can_request);
+        libraries.get_mut("Movies").unwrap().members[0].can_download = false;
+        assert!(!library_access(&user, &libraries).iter().find(|p| p.library == "Movies").unwrap().can_request);
+        user.is_admin = true;
+        let admin = library_access(&user, &libraries);
+        assert_eq!(admin.len(), 3);
+        assert!(admin.iter().all(|p| p.can_request && p.auto_approve_requests));
+    }
+
     use super::*;
     fn sample() -> Request {
         serde_json::from_value(json!({"id":"1","kind":"tv","tmdb_id":10,"title":"A","season":1,"expected_episodes":[1,2],"monitor_future":false,"library":"TV","owner_id":1,"subscribers":[1],"status":"pending","error":null,"created_at":1,"updated_at":1,"hash":null,"service_id":null,"progress":0.0})).unwrap()

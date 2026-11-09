@@ -30,7 +30,7 @@ async function fetchReleases(requestId: string, refresh = false) {
   }
 }
 
-export function RequestForm({ title, kind, bootstrap, onSubmitted, onConfigure }: { title: Title; kind: string; bootstrap: Bootstrap; onSubmitted: () => void; onConfigure?: () => void }) {
+export function RequestForm({ title, kind, bootstrap, onSubmitted }: { title: Title; kind: string; bootstrap: Bootstrap; onSubmitted: () => void }) {
   const allowed=bootstrap.request_access?.filter(p=>p.can_request&&bootstrap.libraries.includes(p.library))||[];
   const missingSeasons=(destination:string)=>{
     const available=bootstrap.availability.filter(a=>a.kind===kind&&a.tmdb_id===title.id&&a.path.split('/')[0]===destination);
@@ -42,7 +42,7 @@ export function RequestForm({ title, kind, bootstrap, onSubmitted, onConfigure }
   const [message,setMessage]=useState("");
   const [subscriptions,setSubscriptions]=useState<Subscription[]>([]);
   useEffect(()=>{if(kind!=="tv")return;let active=true;api<{subscriptions:Subscription[]}>("/subscriptions").then(d=>{if(active)setSubscriptions(d.subscriptions);}).catch(e=>{if(active)setMessage((e as Error).message);});return()=>{active=false;};},[kind]);
-  if (!allowed.length) return <div className="discover-request-unavailable"><p className="discover-muted">{bootstrap.can_manage ? "No library accepts requests yet." : "Ask your administrator for request access to add titles to a library."}</p>{bootstrap.can_manage && onConfigure && <button type="button" onClick={onConfigure}>Configure request access</button>}</div>;
+  if (!allowed.length) return <p className="discover-muted">Downloading requires download access to a Movies &amp; TV library.</p>;
   const existing=bootstrap.availability.filter(a=>a.kind===kind&&a.tmdb_id===title.id&&a.path.split('/')[0]===library);
   const complete=(season:number,count:number)=>count>0&&new Set(existing.flatMap(a=>a.episodes[String(season)]||[])).size>=count;
   const permitted=allowed.find(p=>p.library===library);
@@ -180,11 +180,4 @@ export function RequestsPanel({canManage,refreshKey,title,onCountChange}:{canMan
         }} />
       </div>}{canManage && packOptions.length > 0 && <div className="discover-request-group-actions"><button type="button" aria-expanded={!collapseSeasons} aria-controls={`request-seasons-${first.id}`} onClick={() => setExpandedSeasons(old => ({...old, [groupKey]: !old[groupKey]}))}>{collapseSeasons ? "Show individual seasons" : "Hide individual seasons"}</button></div>}<div id={`request-seasons-${first.id}`} hidden={collapseSeasons} style={{display: collapseSeasons ? "none" : "contents"}}>{group.map(r=><div className="discover-request-season" key={r.id}><div><b>{r.season!==null?seasonLabel(r.season):"Movie"}</b><span>{statuses[r.status]||r.status}{r.monitor_future&&r.status!=="monitoring"?" · Monitoring":""}</span>{r.season===0&&!r.hash&&<p className="discover-muted">Optional specials and extras. Season packs may not include these.</p>}{r.progress>0&&<progress value={r.progress} max={1} />}{r.error&&<p className="discover-error">{r.error}</p>}{r.auto_pick_note&&<p className="discover-muted">Auto pick: {r.auto_pick_note}</p>}{!canManage&&pickable(r.status)&&!r.hash&&<p className="discover-muted">Waiting for an administrator to choose a torrent.</p>}{quotaControls(r)}</div>{controls(r)}</div>)}</div></div></details>;})}
   </section>;
-}
-export function RequestPermissions({libraries, standalone = false}:{libraries:string[]; standalone?: boolean}) {
-  const Container = standalone ? "section" : "details";
-  const [members,setMembers]=useState<Permission[]>([]);const [users,setUsers]=useState<{id:number;name:string}[]>([]);const [message,setMessage]=useState("");const [busy,setBusy]=useState(false);
-  useEffect(()=>{api<{members:Permission[];users:{id:number;name:string}[]}>("/policy").then(d=>{setMembers(d.members);setUsers(d.users);}).catch(e=>setMessage(e.message));},[]);
-  const change=(id:number,library:string,patch:Partial<Permission>)=>setMembers(old=>{const item=old.find(p=>p.user_id===id&&p.library===library)||{user_id:id,library,can_request:false,auto_approve_requests:false,weekly_limit:10};return [...old.filter(p=>p!==item),{...item,...patch}];});
-  return <Container id="discover-request-permissions" tabIndex={-1}>{!standalone && <summary>Request permissions</summary>}<p>Limits count movies and seasons over the last seven days. Zero means unlimited. Library viewing access is still required.</p>{users.map(u=><div key={u.id}><h4>{u.name}</h4>{libraries.map(l=>{const p=members.find(m=>m.user_id===u.id&&m.library===l);return <div key={l} className="discover-policy-row"><b>{l}</b><label><input type="checkbox" checked={p?.can_request||false} onChange={e=>change(u.id,l,{can_request:e.target.checked})}/>Can request</label><label><input type="checkbox" checked={p?.auto_approve_requests||false} onChange={e=>change(u.id,l,{auto_approve_requests:e.target.checked})}/>Auto approve</label><label>Weekly limit<input type="number" min="0" max="1000" value={p?.weekly_limit??10} onChange={e=>change(u.id,l,{weekly_limit:Number(e.target.value)})}/></label></div>;})}</div>)}<button disabled={busy} onClick={async()=>{setBusy(true);try{await api("/policy",jsonRequest("PUT",{members}));setMessage("Permissions saved.");}catch(e){setMessage((e as Error).message);}finally{setBusy(false);}}}>Save permissions</button>{message&&<p role="status">{message}</p>}</Container>;
 }

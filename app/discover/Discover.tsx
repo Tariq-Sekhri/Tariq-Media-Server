@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, jsonRequest } from "./api";
-import { RequestForm, RequestPermissions, type Permission } from "./Requests";
+import { RequestForm, type Permission } from "./Requests";
 import "./style.css";
 import CachedArtworkImage from "../CachedArtworkImage";
 import { useBackLayer } from "../lib/back-layers";
@@ -48,7 +48,6 @@ export default function Discover({ query: headerQuery, onQueryChange }: { query?
   const [detail, setDetail] = useState<Title | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [matchPath, setMatchPath] = useState("");
   const [saving, setSaving] = useState(false);
@@ -102,12 +101,11 @@ export default function Discover({ query: headerQuery, onQueryChange }: { query?
     return () => controller.abort();
   }, [selected, selectedType, kind]);
   useEffect(() => {
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { setSelected(null); setSettingsOpen(false); setHistoryOpen(false); } };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { setSelected(null); setHistoryOpen(false); } };
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
   }, []);
   useBackLayer(historyOpen, () => setHistoryOpen(false));
   useBackLayer(selected !== null, () => setSelected(null));
-  useBackLayer(settingsOpen, () => setSettingsOpen(false));
   const typed = query.trim().toLowerCase();
   const suggestions = history.filter(term => term.toLowerCase() !== typed && (!typed || term.toLowerCase().includes(typed))).slice(0, 8);
   const requestKind = detail ? mediaOf(detail) : selectedType || (kind === "movie" ? "movie" : "tv");
@@ -161,12 +159,11 @@ export default function Discover({ query: headerQuery, onQueryChange }: { query?
       {detail.videos?.results.filter(v => v.site === "YouTube" && v.type === "Trailer").slice(0,1).map(v => <a className="discover-action" href={`https://www.youtube.com/watch?v=${encodeURIComponent(v.key)}`} target="_blank" rel="noreferrer" key={v.key}>Watch trailer ↗</a>)}
       {matches(detail.id).map(a => <a className="discover-action" key={a.path} href={`/?folder=${encodeURIComponent(a.path)}`}>Open in {a.path.split('/')[0]}</a>)}
       </div></div>
-      {bootstrap && <RequestForm key={`${requestKind}:${detail.id}`} title={detail} kind={requestKind} bootstrap={bootstrap} onConfigure={() => { setSettingsOpen(true); }} onSubmitted={()=>{void refresh().catch(e=>setError(e.message));}} />}
+      {bootstrap && <RequestForm key={`${requestKind}:${detail.id}`} title={detail} kind={requestKind} bootstrap={bootstrap} onSubmitted={()=>{void refresh().catch(e=>setError(e.message));}} />}
       {!!detail.credits?.cast.length && <p className="discover-muted">Cast: {detail.credits.cast.slice(0,8).map(c => c.name).join(", ")}</p>}
       {!!detail.recommendations?.results.filter(hasReleased).length && <><h3>More like this</h3><div className="discover-grid">{detail.recommendations.results.filter(t => t.id !== detail.id && hasReleased(t)).slice(0,6).map(card)}</div></>}
       {bootstrap?.can_manage && <details><summary>Library management · Match existing title</summary><form className="discover-inline" onSubmit={async e => { e.preventDefault(); setSaving(true); try { await api("/match", jsonRequest("PUT", { kind: requestKind, tmdb_id: detail.id, path: matchPath })); await refresh(); setMatchPath(""); } catch(e) { setError((e as Error).message); } finally { setSaving(false); } }}><input aria-label="Existing title path" placeholder="Library/Title folder or movie.mkv" value={matchPath} onChange={e => setMatchPath(e.target.value)} required /><button disabled={saving}>Save match</button></form></details>}
     </>}</div></section></div>}
-    {settingsOpen && <div className="discover-backdrop"><section tabIndex={-1} ref={focusDialog} className="discover-dialog discover-settings" role="dialog" aria-modal="true" aria-label="Request access"><button className="discover-close" onClick={() => setSettingsOpen(false)} aria-label="Close">×</button><h2>Request access</h2>{bootstrap?.is_admin && <RequestPermissions libraries={bootstrap.libraries} standalone />}</section></div>}
 
   </div>;
 }

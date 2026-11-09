@@ -88,9 +88,9 @@ async fn create(
     let allowed = access(&state, &user)
         .await?
         .into_iter()
-        .any(|p| p.library == input.library && p.can_request && (p.auto_approve_requests || user.is_admin));
+        .any(|p| p.library == input.library && p.can_request);
     if !allowed {
-        return Err(error(StatusCode::FORBIDDEN, "Ask an administrator to subscribe to this show."));
+        return Err(error(StatusCode::FORBIDDEN, "You do not have permission to download into this library."));
     }
     if !arr::tv_service_enabled(&state, &input.library).await? {
         return Err(error(
