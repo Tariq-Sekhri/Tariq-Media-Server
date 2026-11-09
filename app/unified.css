@@ -7196,8 +7196,18 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 
 /* Libraries settings and access. */
 .lib-opt-field { display: flex; align-items: center; gap: 8px; color: #9aa4ac; font-size: 13px; }
-.lib-opt-switch { display: inline-flex; align-items: center; gap: 7px; color: #c3cacf; font-size: 13px; cursor: pointer; }
-.lib-opt-switch input { width: 16px; height: 16px; accent-color: #806bea; }
+.lib-opt-field select { box-sizing: border-box; width: 100%; min-height: 40px; border: 1px solid #343b43; border-radius: 8px; padding: 8px 10px; background: #11161c; color: #e2e7eb; font: inherit; font-size: 14px; cursor: pointer; color-scheme: dark; }
+.lib-opt-field select:hover { border-color: #565064; }
+.lib-opt-field select option { background: #11161c; color: #e2e7eb; }
+.lib-opt-field select:focus-visible,.lib-opt-switch input:focus-visible { outline: 2px solid #a38ce8; outline-offset: 3px; }
+.lib-opt-switch { display: flex; align-items: center; justify-content: space-between; align-self: stretch; min-height: 40px; gap: 12px; color: #d5dbe1; font-size: 14px; cursor: pointer; }
+.lib-opt-switch span { order: -1; }
+.lib-opt-switch input { position: relative; appearance: none; -webkit-appearance: none; flex: 0 0 40px; width: 40px; height: 24px; margin: 0; border: 1px solid #4b5463; border-radius: 20px; background: #303846; cursor: pointer; transition: background .15s, border-color .15s; }
+.lib-opt-switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #e8edf5; transition: transform .15s; }
+.lib-opt-switch input:checked { border-color: #a38ce8; background: #8770d7; }
+.lib-opt-switch input:checked::after { transform: translateX(16px); }
+@media (pointer: coarse) { .lib-opt-field select,.lib-opt-switch { min-height: 48px; } }
+@media (prefers-reduced-motion: reduce) { .lib-opt-switch input,.lib-opt-switch input::after { transition: none; } }
 .lib-opt-ghost { border: 1px solid #3a424a; border-radius: 7px; padding: 7px 11px; background: #181d22; color: #dfe4e7; font-size: 12px; font-weight: 750; cursor: pointer; }
 .lib-opt-ghost:hover:not(:disabled) { border-color: #725de0; }
 .lib-opt-ghost:disabled { opacity: .55; cursor: default; }

@@ -55,7 +55,7 @@ function TypeSelect({ ctx, path }: { ctx: Ctx; path: string }) {
 }
 
 function Switch({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
-  return <label className="lib-opt-switch"><input type="checkbox" aria-label={label} checked={checked} onChange={(event) => onChange(event.target.checked)} /><span>{label}</span></label>;
+  return <label className="lib-opt-switch"><input type="checkbox" role="switch" aria-label={label} checked={checked} onChange={(event) => onChange(event.target.checked)} /><span>{label}</span></label>;
 }
 
 function PermissionChips({ ctx, path, name }: { ctx: Ctx; path: string; name: string }) {
