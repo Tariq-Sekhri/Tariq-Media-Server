@@ -7931,6 +7931,7 @@ async fn user_state(
         .users
         .remove(&user.id)
         .unwrap_or_default();
+    merge_instagram_tags(&state.user_state_path, &mut user_state).await;
     retain_visible_user_state(&user, &read_libraries(&state).await, &mut user_state);
     Ok(Json(user_state))
 }
@@ -9492,8 +9493,84 @@ fn allocation_files_after_moves(
 }
 
 
+#[derive(Default, Deserialize)]
+struct InstagramArchiveMetadata {
+    #[serde(skip)]
+    source_root: String,
+    #[serde(skip)]
+    destination_root: String,
+    #[serde(default)]
+    tags: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    aliases: BTreeMap<String, String>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct InstagramArchiveRoots {
+    source_root: String,
+    destination_root: String,
+}
+
+impl InstagramArchiveMetadata {
+    fn roots(&self) -> Option<(String, String)> {
+        if !is_library_path(&self.source_root) || !safe_relative_path(&self.destination_root)
+            || path_is_within(&self.source_root, &self.destination_root)
+            || path_is_within(&self.destination_root, &self.source_root) {
+            return None;
+        }
+        Some((self.source_root.clone(), self.destination_root.clone()))
+    }
+}
+
+async fn instagram_archive_metadata(path: &Path) -> InstagramArchiveMetadata {
+    let Some(parent) = path.parent() else { return InstagramArchiveMetadata::default() };
+    let mut metadata: InstagramArchiveMetadata = read_persisted_json(&parent.join("instagram-archive.json")).await.unwrap_or_default();
+    // Separate private configuration survives refreshes of the generated archive.
+    let roots: InstagramArchiveRoots = read_persisted_json(&parent.join("instagram-archive-config.json")).await.unwrap_or_default();
+    metadata.source_root = roots.source_root;
+    metadata.destination_root = roots.destination_root;
+    metadata
+}
+
+// Source tags are merged only into the response, preserving users' own tags on disk.
+async fn merge_instagram_tags(path: &Path, user: &mut UserState) {
+    let metadata = instagram_archive_metadata(path).await;
+    let Some((_, destination_root)) = metadata.roots() else { return };
+    for (path, values) in metadata.tags {
+        if path.starts_with(&format!("{destination_root}/")) && safe_relative_path(&path) {
+            if let Some(tags) = normalize_tags(values) {
+                user.tags.entry(path).or_default().extend(tags);
+            }
+        }
+    }
+}
+
 async fn read_user_states(path: &Path) -> UserStates {
-    read_persisted_json(path).await.unwrap_or_default()
+    let mut states: UserStates = read_persisted_json(path).await.unwrap_or_default();
+    // Rewrite only aliases actually referenced, avoiding repeated full-state copies.
+    let mut referenced = BTreeSet::new();
+    for user in states.users.values() {
+        referenced.extend(user.favorites.iter().cloned());
+        referenced.extend(user.playback.keys().cloned());
+        referenced.extend(user.last_accessed.keys().cloned());
+        referenced.extend(user.tags.keys().cloned());
+        for playlist in user.playlists.values() {
+            referenced.extend(playlist.paths.iter().cloned());
+        }
+    }
+    // Keep favorites, playback, playlists and custom tags attached after flattening.
+    let metadata = instagram_archive_metadata(path).await;
+    let Some((source_root, destination_root)) = metadata.roots() else { return states };
+    for (source, destination) in metadata.aliases.into_iter().rev() {
+        if referenced.contains(&source)
+            && path_is_within(&source, &source_root)
+            && path_is_within(&destination, &destination_root)
+            && safe_relative_path(&source) && safe_relative_path(&destination) {
+            rewrite_all_media_paths(&mut states, &source, &destination);
+        }
+    }
+    states
 }
 
 async fn write_user_states(path: &Path, states: &UserStates) -> StatusCode {
@@ -19812,6 +19889,46 @@ mod tests {
         assert!(write_persisted_json(&path, &first).await.is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"{broken");
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn instagram_archive_roots_require_explicit_disjoint_scopes() {
+        let mut metadata = InstagramArchiveMetadata::default();
+        assert!(metadata.roots().is_none());
+        metadata.source_root = "ArchiveSource".into();
+        metadata.destination_root = "../outside".into();
+        assert!(metadata.roots().is_none());
+        metadata.destination_root = "ArchiveSource/Nested".into();
+        assert!(metadata.roots().is_none());
+        metadata.destination_root = "Media/Imported".into();
+        assert!(metadata.roots().is_some());
+    }
+
+    #[tokio::test]
+    async fn instagram_source_metadata_preserves_organization_and_filters_paths() {
+        let root = std::env::temp_dir().join(format!("tms-instagram-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("user-state.json");
+        let old = "ArchiveSource/creator/Posts/a.jpg";
+        let new = "Media/Imported/a.jpg";
+        std::fs::write(&path, serde_json::to_vec(&serde_json::json!({"users":{"1":{
+            "favorites":[old], "tags":{old:["custom"]}, "last_accessed":{"ArchiveSource":12}
+        }}})).unwrap()).unwrap();
+        std::fs::write(root.join("instagram-archive-config.json"), serde_json::to_vec(&serde_json::json!({
+            "source_root":"ArchiveSource", "destination_root":"Media/Imported"
+        })).unwrap()).unwrap();
+        std::fs::write(root.join("instagram-archive.json"), serde_json::to_vec(&serde_json::json!({
+            "aliases":{old:new, "ArchiveSource":"Media/Imported"}, "tags":{new:["@creator","fav"], "Other/private.jpg":["leak"]}
+        })).unwrap()).unwrap();
+        let states = read_user_states(&path).await;
+        let mut user = states.users[&1].clone();
+        assert!(user.favorites.contains(new));
+        assert_eq!(user.last_accessed["Media/Imported"], 12);
+        merge_instagram_tags(&path, &mut user).await;
+        assert_eq!(user.tags[new], BTreeSet::from(["custom".into(), "@creator".into(), "fav".into()]));
+        assert!(!user.tags.contains_key("Other/private.jpg"));
+        assert_eq!(states.users[&1].tags[new], BTreeSet::from(["custom".into()]));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
