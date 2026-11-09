@@ -9,6 +9,7 @@ import CapacitorAppListener from "./CapacitorAppListener";
 import ProductionReleaseReloader from "./ProductionReleaseReloader";
 import PlaybackProvider from "./PlaybackProvider";
 import AppShell from "./AppShell";
+import AppConfirmProvider from "./AppConfirmProvider";
 
 export const metadata: Metadata = {
   title: "TMS — Tariq’s Media Server",
@@ -30,5 +31,5 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en" suppressHydrationWarning><body suppressHydrationWarning><ModalIsolation /><CapacitorAppListener /><AuthGate><PlaybackProvider><AppShell>{children}</AppShell></PlaybackProvider></AuthGate><PwaServiceWorker /><ProductionReleaseReloader /></body></html>;
+  return <html lang="en" suppressHydrationWarning><body suppressHydrationWarning><ModalIsolation /><CapacitorAppListener /><AuthGate><AppConfirmProvider><PlaybackProvider><AppShell>{children}</AppShell></PlaybackProvider></AppConfirmProvider></AuthGate><PwaServiceWorker /><ProductionReleaseReloader /></body></html>;
 }

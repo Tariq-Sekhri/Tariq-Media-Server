@@ -3,6 +3,7 @@
 /* Dynamic media comes directly from the local server, so Next's image optimizer is not applicable. */
 /* eslint-disable @next/next/no-img-element */
 
+import { useAppConfirm } from "./AppConfirmProvider";
 import { useBackLayer } from "./lib/back-layers";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import MobileNavigation from "./MobileNavigation";
@@ -1091,6 +1092,7 @@ function mediaTitleContent(text: string) {
 }
 
 export default function Home() {
+  const appConfirm = useAppConfirm();
   const sessionUser = useMemo(() => getSessionUser(), []);
   const canOpenAdminPanel = canAccessAdminPanel(sessionUser);
   const canAccessNotes = canOpenAdminPanel;
@@ -4445,7 +4447,7 @@ export default function Home() {
     }
   };
   const removeOfflineDownload = async (bundle: OfflineBundle) => {
-    if (!window.confirm(`Remove the offline copy of ${bundle.name}? The server copy will not be changed.`)) return;
+    if (!await appConfirm({ title: "Remove offline copy?", description: `Remove ${bundle.name} from this device? The server copy will stay available.`, action: "Remove copy", danger: true })) return;
     try {
       await removeOfflineBundle(bundle.id);
       setOfflineBundles((current) => current.filter((entry) => entry.id !== bundle.id));
@@ -5296,7 +5298,7 @@ export default function Home() {
   const revokeDeviceSession = async (session: DeviceSession) => {
     if (revokingDeviceSession) return;
     const current = session.current;
-    if (!window.confirm(current ? "Log out this device?" : `Log out ${session.device}?`)) return;
+    if (!await appConfirm({ title: current ? "Log out this device?" : "Log out device?", description: current ? "You will need to sign in again on this device." : `Log out ${session.device}? It will need to sign in again to access TMS.`, action: "Log out", danger: true })) return;
     setRevokingDeviceSession(session.token);
     setSettingsError("");
     try {
@@ -5317,7 +5319,7 @@ export default function Home() {
     setMagnetTarget(destination);
   };
   const controlMagnetDownload = async (hash: string, action: "pause" | "resume" | "cancel" | "cap" | "uncap") => {
-    if (action === "cancel" && !window.confirm("Cancel this download and remove its partial files?")) return;
+    if (action === "cancel" && !await appConfirm({ title: "Cancel download?", description: "The download will stop and its partial files will be removed.", action: "Cancel download", danger: true })) return;
     setMagnetControlHash(hash);
     try {
       const response = await authFetch(`${API_BASE}/api/downloads/magnet/control`, {

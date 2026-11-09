@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
+import { useAppConfirm } from "../AppConfirmProvider";
 import { API_BASE } from "../lib/media";
 import { authFetch, canAccessAdminPanel, clearSession, emptyAdminPermissions, getSessionUser, hasAdminPermission, logOut, reportClientPerformance, type AdminPermissions } from "../lib/auth";
 import type { YtDlpJob } from "../ServerDownloadDialog";
@@ -241,6 +242,7 @@ const formatLogTime = (timestamp: string) => {
 const logValue = (line: string, key: string) => line.match(new RegExp(`(?:^|\\s)${key}=([^\\s]+)`))?.[1];
 
 export default function AdminDashboard() {
+  const appConfirm = useAppConfirm();
   const currentUser = useMemo(() => getSessionUser(), []);
   const canViewUsers = hasAdminPermission(currentUser, "view_users");
   const canCreateUsers = hasAdminPermission(currentUser, "create_users");
@@ -405,7 +407,7 @@ export default function AdminDashboard() {
   }, []);
 
   const resolveDeleteRequest = async (entry: DeleteRequest, action: "trash" | "dismiss") => {
-    if (action === "trash" && !window.confirm(`Move ${entry.path} to recoverable Trash?`)) return;
+    if (action === "trash" && !await appConfirm({ title: "Move to Trash?", description: `Move ${entry.path} to recoverable Trash?`, action: "Move to Trash", danger: true })) return;
     setResolvingDeleteRequest(entry.id);
     setError("");
     try {
@@ -431,7 +433,7 @@ export default function AdminDashboard() {
   const setSection = selectSection;
 
   const clearMetrics = async () => {
-    if (!currentUser?.is_admin || !window.confirm("Permanently delete all recorded client performance metrics across all users? This cannot be undone.")) return;
+    if (!currentUser?.is_admin || !await appConfirm({ title: "Clear performance metrics?", description: "Permanently delete recorded client performance metrics across all users? This cannot be undone.", action: "Clear metrics", danger: true })) return;
     setClearingMetrics(true);
     setMetricsClearMessage("");
     setError("");
@@ -636,7 +638,7 @@ export default function AdminDashboard() {
   };
 
   const deleteCookies = async () => {
-    if (!confirm("Are you sure you want to remove the server's cookies.txt file?")) return;
+    if (!await appConfirm({ title: "Remove saved cookies?", description: "Remove the server?s cookies.txt file? Downloads requiring those cookies may need you to import them again.", action: "Remove cookies", danger: true })) return;
     try {
       const response = await authFetch(`${API_BASE}/api/admin/downloads/cookies`, { method: "DELETE" });
       if (response.ok) {
@@ -860,7 +862,7 @@ export default function AdminDashboard() {
   const detachLibraryLocation = async (location: LibraryLocation) => {
     if (!location.external || detachingLocation) return;
     const locationLabel = location.parent_library ? `${location.parent_library} / ${location.folder_path}` : location.name;
-    if (!window.confirm(`Remove ${locationLabel} from TMS?\n\nThe real folder and every file inside it will stay untouched at:\n${location.path}`)) return;
+    if (!await appConfirm({ title: "Remove library location?", description: `Remove ${locationLabel} from TMS?\n\nThe folder and its files will stay at:\n${location.path}`, action: "Remove location", danger: true })) return;
     const key = `${location.parent_library ?? "library"}:${location.folder_path ?? location.name}`;
     setDetachingLocation(key);
     setError("");
@@ -1031,7 +1033,7 @@ export default function AdminDashboard() {
   };
   const deleteUser = async () => {
     if (!editingUser || deletingUser || editingUser.id === currentUser?.id) return;
-    if (!window.confirm(`Delete ${editingUser.name}? Their sessions and library assignments will be removed. Their media will not be deleted.`)) return;
+    if (!await appConfirm({ title: "Delete user?", description: `Delete ${editingUser.name}? Their sessions and library assignments will be removed. Their media will stay on the server.`, action: "Delete user", danger: true })) return;
     setDeletingUser(true);
     setError("");
     try {
@@ -1063,7 +1065,7 @@ export default function AdminDashboard() {
   };
   const revokeUserSession = async (session: DeviceSession) => {
     if (!sessionUser || revokingSession) return;
-    if (!window.confirm(`Log ${sessionUser.name} out of ${session.device}?`)) return;
+    if (!await appConfirm({ title: "Log out device?", description: `Log ${sessionUser.name} out of ${session.device}?`, action: "Log out", danger: true })) return;
     setRevokingSession(session.token);
     try {
       const response = await authFetch(`${API_BASE}/api/admin/users/${sessionUser.id}/sessions/${encodeURIComponent(session.token)}`, { method: "DELETE" });

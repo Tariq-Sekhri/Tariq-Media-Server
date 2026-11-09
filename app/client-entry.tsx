@@ -10,6 +10,7 @@ import CapacitorAppListener from "./CapacitorAppListener";
 import PwaServiceWorker from "./PwaServiceWorker";
 import PlaybackProvider from "./PlaybackProvider";
 import AppShell from "./AppShell";
+import AppConfirmProvider from "./AppConfirmProvider";
 import "./globals.css";
 import "./unified.css";
 import "./watch-player-controls.css";
@@ -21,4 +22,4 @@ if (url.pathname === "/index.html" || url.pathname === "/offline.html") {
   window.history.replaceState(null, "", url.pathname + url.search);
 }
 const Page = url.pathname === "/watch" ? Watch : url.pathname === "/login" ? Login : url.pathname === "/admin" ? Admin : Home;
-createRoot(document.getElementById("root")!).render(<><ModalIsolation /><CapacitorAppListener /><AuthGate><PlaybackProvider><AppShell><Page /></AppShell></PlaybackProvider></AuthGate><PwaServiceWorker /></>);
+createRoot(document.getElementById("root")!).render(<><ModalIsolation /><CapacitorAppListener /><AuthGate><AppConfirmProvider><PlaybackProvider><AppShell><Page /></AppShell></PlaybackProvider></AppConfirmProvider></AuthGate><PwaServiceWorker /></>);
