@@ -1453,7 +1453,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
                       </div>
                     </div>
                   )}
-                <div className="admin-metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '0.5rem', padding: '0.5rem 0 0' }}>
+                <div className="admin-metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '0.5rem', padding: 0 }}>
                   
                   <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
                     <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.15rem' }}>Cache Read Time</div>
