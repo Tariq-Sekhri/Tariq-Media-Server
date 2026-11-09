@@ -33,6 +33,8 @@ export default function LibrariesOptions(props: LibrariesOptionProps) {
   const isAdmin = (name: string) => Boolean(props.users.find((user) => same(user.name, name))?.is_admin);
   const names = [...new Set([...props.users.map((user) => user.name), ...paths.flatMap((path) => props.libraries[path].members.map((member) => member.name))])].filter((name) => !isAdmin(name)).sort((a, b) => a.localeCompare(b));
   const accessCount = (path: string) => props.libraries[path].members.filter((member) => member.can_view && !isAdmin(member.name)).length;
+  // Stable sorting preserves the existing server order when access counts match.
+  paths.sort((a, b) => accessCount(b) - accessCount(a));
   const memberOf = (path: string, name: string) => props.libraries[path].members.find((member) => same(member.name, name));
   const typeLabel = (type: ContentType) => props.types.find((option) => option.value === type)?.label ?? type;
   const status = (path: string) => props.savingLibrary === path ? "Saving…" : props.savedLibrary === path ? "Saved" : "";
