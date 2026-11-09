@@ -1729,7 +1729,6 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
             </article>
           );
         })}
-        <article className="admin-location-note"><b>External folders stay where they are.</b><span>TMS mounts each one under its library name so playback, uploads, downloads, permissions, previews, and mobile clients use it like any other library. Removing it here only removes that mount.</span></article>
       </div>}
 
       {section === "downloads" && <div className="admin-library-list">
