@@ -7360,9 +7360,9 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 
 /* Keep desktop account details aligned with the other cells in the row. */
 @media (min-width: 901px) {
-  .admin-user-identity > div { flex: 1; flex-direction: row; align-items: center; gap: 16px; }
+  .admin-user-identity > div { flex: 1; display: grid; grid-template-columns: minmax(0, 160px) minmax(0, 1fr); align-items: center; gap: 16px; }
   .admin-user-identity > div > b { flex: none; max-width: 160px; }
-  .admin-user-identity .admin-user-storage { flex: 1; width: auto; flex-direction: row; align-items: center; justify-content: center; gap: 12px; }
-  .admin-user-storage small { min-width: 0; }
+  .admin-user-identity .admin-user-storage { display: grid; width: auto; grid-template-columns: minmax(0, 190px) minmax(48px, 120px); align-items: center; justify-content: center; gap: 12px; }
+  .admin-user-storage small { min-width: 0; text-align: left; }
   .admin-user-storage progress { flex: 0 1 120px; min-width: 48px; width: 120px; margin-top: 0; }
 }
