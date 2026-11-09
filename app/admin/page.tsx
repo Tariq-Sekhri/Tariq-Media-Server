@@ -1245,15 +1245,15 @@ export default function AdminDashboard() {
 
 
 
-      {section === "notifications" && currentUser?.is_admin && <article className="admin-surface admin-section-surface discover-panel">
-        <RequestsPanel canManage refreshKey={discoverRequestRefresh} title="Discover requests" onCountChange={setPendingDiscoverRequests} />
-      </article>}
-
       {section === "trash" && currentUser?.is_admin && <AdminTrash />}
 
-      {section === "notifications" && currentUser?.is_admin && <article className="admin-surface admin-section-surface">
-        <header><div><p>DELETE REQUESTS</p><h2>Deletion requests</h2></div></header>
-        {loading ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading requests</b></div> : deleteRequests.length ? <div className="admin-delete-requests">
+      {section === "notifications" && currentUser?.is_admin && <div className="admin-requests-columns">
+        <section className="discover-panel">
+          <RequestsPanel canManage refreshKey={discoverRequestRefresh} title="Discover requests" onCountChange={setPendingDiscoverRequests} />
+        </section>
+        <section className="admin-requests-deletions">
+        <h2>Deletion requests</h2>
+        {loading ? <p className="admin-requests-empty">Loading requests…</p> : deleteRequests.length ? <div className="admin-delete-requests">
           {deleteRequests.map((entry) => <div className="admin-delete-request" key={entry.id}>
             <div><b>{entry.path.split("/").pop()}</b><small>{entry.path}</small><span>Requested by {entry.requested_by_name} · {new Date(entry.requested_at * 1000).toLocaleString()}</span></div>
             <div className="admin-delete-request-actions">
@@ -1261,8 +1261,9 @@ export default function AdminDashboard() {
               <button type="button" className="admin-primary-action" disabled={Boolean(resolvingDeleteRequest)} onClick={() => void resolveDeleteRequest(entry, "trash")}>{resolvingDeleteRequest === entry.id ? "Working…" : "Move to Trash"}</button>
             </div>
           </div>)}
-        </div> : <div className="admin-panel-empty"><span>✓</span><b>All caught up</b><p>New deletion requests will appear here.</p></div>}
-      </article>}
+        </div> : <p className="admin-requests-empty">New deletion requests will appear here.</p>}
+        </section>
+      </div>}
 
       {section === "overview" && <article className="admin-surface admin-section-surface">
         <header><div><p>LIMITED ADMIN</p><h2>No tools assigned</h2><span>A full administrator can grant user, metrics, library, or server-download permissions from the Users section.</span></div><a href="/" onClick={(e) => e.preventDefault()} style={{ display: 'contents' }}><button className="admin-primary-action" onClick={() => window.location.assign("/")}>Back to libraries</button></a></header>

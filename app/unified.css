@@ -7289,3 +7289,14 @@ thead .lib-tabs-person { background: #12171b; }
   .lib-opt-detail > header { flex-wrap: wrap; }
   .ui-option-picker > span { display: none; }
 }
+
+/* Requests: two plain columns on the page background. */
+.admin-requests-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; align-items: start; }
+.admin-requests-columns > section { min-width: 0; }
+.admin-requests-columns .discover-requests { margin: 0; }
+.admin-requests-columns .discover-header h2,
+.admin-requests-deletions > h2 { margin: 0 0 14px; color: #e6eaee; font-size: 20px; font-weight: 700; }
+.admin-requests-columns .discover-empty,
+.admin-requests-empty { margin: 0; padding: 0; border: 0; background: none; color: #9faab4; text-align: left; font-size: 14px; }
+.admin-requests-deletions .admin-delete-request { padding: 14px 0; }
+@media (max-width: 900px) { .admin-requests-columns { grid-template-columns: 1fr; gap: 28px; } }
