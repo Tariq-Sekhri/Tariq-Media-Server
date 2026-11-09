@@ -1162,6 +1162,12 @@ export default function AdminDashboard() {
       </div>
     </details>
   </section>;
+  const headerActions = <>
+            {section === "locations" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={openAddLocation}>Add folder</button>}
+            {section === "libraries" && <LibrariesLayoutPicker layout={librariesLayout} onChange={setLibrariesLayout} />}
+            {section === "libraries" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={() => setShowCreateLibrary(true)}>Create library</button>}
+            {section !== "processes" && section !== "trash" && <button type="button" aria-label={loading ? "Refreshing" : "Refresh"} onClick={() => void refresh()} disabled={loading || clearingMetrics}><MenuIcon name="restore" />{loading ? "Refreshing" : "Refresh"}</button>}
+  </>;
   return <main className="admin-shell">
     <MobileNavigation active="admin" admin={true} />
     <header className="admin-app-header">
@@ -1225,19 +1231,15 @@ export default function AdminDashboard() {
         )}
         {currentUser?.is_admin && <button className={section === "trash" ? "active" : ""} aria-current={section === "trash" ? "page" : undefined} onClick={() => setSection("trash")}><span aria-hidden="true">♲</span>Trash</button>}
       </nav>
+      <div className="admin-page-header-actions admin-sidebar-actions">{headerActions}</div>
     </aside>
 
     <section className="admin-workspace">
 
-      <div className={`admin-page-header-bar${section === "processes" || section === "trash" ? " is-empty" : ""}`}>
+      <div className="admin-page-header-bar">
       <label className="admin-category-selector"><span>Admin</span><select aria-label="Admin category" value={section} onChange={event => setSection(event.target.value as AdminSection)}>{availableSections.map(value => <option key={value} value={value}>{sectionCopy[value].title}</option>)}</select></label>
         <header className="admin-page-header">
-          <div className="admin-page-header-actions">
-            {section === "locations" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={openAddLocation}>Add folder</button>}
-            {section === "libraries" && <LibrariesLayoutPicker layout={librariesLayout} onChange={setLibrariesLayout} />}
-            {section === "libraries" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={() => setShowCreateLibrary(true)}>Create library</button>}
-            {section !== "processes" && section !== "trash" && <button type="button" aria-label={loading ? "Refreshing" : "Refresh"} onClick={() => void refresh()} disabled={loading || clearingMetrics}><MenuIcon name="restore" />{loading ? "Refreshing" : "Refresh"}</button>}
-          </div>
+          <div className="admin-page-header-actions">{headerActions}</div>
         </header>
       </div>
       {error && <div className="admin-page-error">{error}</div>}

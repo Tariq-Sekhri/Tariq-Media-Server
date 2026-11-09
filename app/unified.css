@@ -5293,7 +5293,8 @@
 .admin-workspace { min-width: 0; padding: 30px clamp(24px, 4vw, 58px) 70px; }
 .admin-page-header-bar { position: sticky; top: 122px; z-index: 30; margin: -30px calc(-1 * clamp(24px, 4vw, 58px)) 0; padding: 30px clamp(24px, 4vw, 58px) 18px; background: #0b0d10f5; border-bottom: 1px solid #1e2328; backdrop-filter: blur(14px); }
 .admin-page-header { display: flex; align-items: flex-end; justify-content: flex-end; gap: 22px; max-width: 1280px; margin: 0 auto; }
-@media (min-width: 761px) { .admin-page-header-bar { padding-top: 22px; padding-bottom: 12px; } .admin-page-header-bar.is-empty { display: none; } }
+@media (min-width: 761px) { .admin-page-header-bar { display: none; } .admin-sidebar-actions { margin-left: auto; } }
+@media (max-width: 760px) { .admin-sidebar-actions { display: none !important; } }
 .admin-page-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .admin-page-header p,.admin-surface header p { margin: 0 0 7px; color: #8e76f5; font-size: 8px; font-weight: 950; letter-spacing: 1.35px; }
 .admin-page-header h1 { margin: 0; font-size: 32px; letter-spacing: -1.2px; }.admin-page-header > div:first-child > span { display: block; margin-top: 8px; color: #737d85; font-size: 11px; }
