@@ -1180,6 +1180,9 @@
   min-width: 0;
 }
 
+.unified-layout .browse-header { display: contents; }
+.unified-layout .library-cover-icon { position: absolute; inset: 0; display: grid; place-items: center; background: #171c24; color: #b6a3ff; }
+.unified-layout .library-cover-icon svg { width: 40%; max-width: 96px; height: auto; }
 .unified-layout .browse-controls { grid-column: 2; grid-row: 2; min-width: 0; display: flex; flex-direction: column; }
 
 .unified-layout .toolbar {
@@ -6986,6 +6989,9 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 
 /* Desktop filters keep readable labels without oversized chips. */
 @media (min-width: 761px) {
+ .unified-layout .browse-header:has(> .browse-controls) { grid-column: 2; grid-row: 1 / 3; display: flex; align-items: center; gap: 20px; min-width: 0; margin-bottom: 8px; }
+ .unified-layout .browse-header > .heading-row { flex: 0 0 auto; }
+ .unified-layout .browse-header > .browse-controls { flex: 1 1 0; min-width: 0; margin-bottom: 0; }
  .unified-layout .browse-controls { flex-direction: row; align-items: center; gap: 12px; margin-bottom: 8px; }
  .unified-layout .browse-controls > .tag-strip { flex: 1 1 0; min-width: 0; overflow-x: auto; white-space: nowrap; }
  .unified-layout .browse-controls > .tag-strip > * { flex-shrink: 0; }

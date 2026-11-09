@@ -249,6 +249,8 @@ const writeLibraryBrowsePrefs = (prefs: Partial<LibraryBrowsePreferences>, folde
   } catch {}
 };
 const defaultLibraryConfig = (): LibraryConfig => ({ content_type: "mixed", members: [{ name: "Tariq", can_view: true, can_delete: true, can_move: true, can_create_folders: true, can_upload: true, can_download: true, can_rename: true }], title_folders: [], folder_structure_static: false });
+const libraryDisplayName = (name: string) => name.replace(/\bmoives(?= and shows\b)/gi, "Movies");
+
 const libraryTypeLabel = (contentType: LibraryContentType) => ({ mixed: "Mixed media", movies_tv: "Movies & TV shows", music: "Music", files: "Any files" })[contentType];
 const formatMediaDuration = (seconds?: number) => {
   if (!seconds || !Number.isFinite(seconds)) return "";
@@ -5725,7 +5727,7 @@ export default function Home() {
         ? childEntries.some((item) => item.kind === "folder" && item.parent === path && !item.trashed && isSidebarFolder(item, path))
         : false;
       const isActiveBranch = currentFolder === path || currentFolder?.startsWith(`${path}/`);
-      const displayName = titleCollectionForPath(path)?.label ?? folder.name;
+      const displayName = titleCollectionForPath(path)?.label ?? libraryDisplayName(folder.name);
       return <div className={`folder-tree-group ${isLibrary ? "library-tree-group" : ""}`} key={folder.id}>
         <div className="folder-tree-entry">
           {hasChildren ? <button type="button" className="folder-tree-expand" aria-label={`${isExpanded ? "Collapse" : "Expand"} ${displayName}`} aria-expanded={isExpanded} onClick={() => setExpandedFolders(current => current.includes(path) ? current.filter(p => p !== path) : [...current, path])}><MenuIcon name={isExpanded ? "chevronDown" : "chevronRight"} /></button> : <span className="folder-tree-slot" aria-hidden="true" />}
@@ -6820,6 +6822,7 @@ export default function Home() {
               </button>
             </div>
           </aside>
+          <div className="browse-header">
           <div className="heading-row">
             <div>
 
@@ -6869,7 +6872,7 @@ export default function Home() {
                             setCurrentFolder(path);
                           }}
                         >
-                          {(titleCollectionForPath(path)?.label ?? part).toUpperCase()}
+                          {(titleCollectionForPath(path)?.label ?? (index === 0 ? libraryDisplayName(part) : part)).toUpperCase()}
                         </button>
                       </a>
                     </span>
@@ -6886,7 +6889,7 @@ export default function Home() {
                     ? `Results for “${activeSearch.trim()}”`
                     : currentFolder
                     ? (titleCollectionForPath(currentFolder)?.label ??
-                      currentFolder.split("/").at(-1))
+                      libraryDisplayName(currentFolder.split("/").at(-1) ?? ""))
                     : title}
                   </span>
                   {!isPlaylistOverview && section !== "notes" && section !== "offline" && section !== "discover" && (
@@ -7248,6 +7251,8 @@ export default function Home() {
           </div>
           )}
 
+          </div>
+
           {hasMoreVisible && (
             <div className="library-load-more library-load-more-mobile" aria-live="polite">
               {serverPageLoading && <><span className="library-load-more-spinner" aria-hidden="true" /><strong>Loading more…</strong></>}
@@ -7375,7 +7380,7 @@ export default function Home() {
                     ? titleCollectionForPath(itemPath)
                     : null;
                   let displayName =
-                    metadata?.name ?? (isTitle ? catalogTitle?.title : titleCollection?.label) ?? (item.kind === "folder" ? item.name : fileNameStem(item.name));
+                    metadata?.name ?? (isTitle ? catalogTitle?.title : titleCollection?.label) ?? (isLibrary ? libraryDisplayName(item.name) : item.kind === "folder" ? item.name : fileNameStem(item.name));
                   const displayTags = item.tags.filter((tag) => !commonTags.has(tag) && !["Video", "Photos", "Audio", "File"].includes(tag));
                   const artworkPath = isTitle ? titleCardPath : itemPath;
                   const autoCover = artworkPath
@@ -7642,6 +7647,10 @@ export default function Home() {
                             initial={displayName.slice(0, 1)}
                             metadataPending={metadataPending}
                           />
+                        ) : isLibrary && libraries[item.name]?.content_type === "music" ? (
+                          <div className="library-cover-icon" aria-label="Music library">
+                            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13M9 9l12-2" /><ellipse cx="6" cy="18" rx="3" ry="3" /><ellipse cx="18" cy="16" rx="3" ry="3" /></svg>
+                          </div>
                         ) : item.kind === "folder" ? (
                           coverImage ? (
                             <CachedArtworkImage
