@@ -7340,6 +7340,9 @@ thead .lib-tabs-person { background: #12171b; }
 
 /* Admin inside the shared TMS header: the workspace already clears the header. */
 .admin-shell.admin-embedded { min-height: 0; padding-top: 0; padding-bottom: 0; background: transparent; }
+.admin-embedded .admin-workspace:has(> .admin-processes-workspace) { padding-top: 0; }
+.admin-workspace .admin-processes-surface.admin-section-surface { margin-top: 0 !important; }
+.admin-workspace .admin-processes-surface > header { padding-top: 0 !important; }
 .admin-workspace .admin-metrics-surface.admin-section-surface { margin-top: 4px !important; }
 .admin-insights { display: grid; gap: 14px; padding-top: 14px; }
 .admin-insight-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
