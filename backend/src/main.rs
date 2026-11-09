@@ -41,6 +41,8 @@ mod qbit;
 mod preview_discovery;
 mod uploads;
 mod ytdlp_archive;
+#[cfg(test)]
+mod reservation_tests;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -5203,15 +5205,17 @@ fn reserve_storage_with_override(
     bytes: u64,
     quota_override: bool,
 ) -> bool {
-    ledger
-        .reservations
-        .retain(|reservation| reservation.id != reservation_id);
-    let (used, reserved) = storage_usage(ledger, user.id);
+    let (used, _) = storage_usage(ledger, user.id);
+    let reserved = ledger.reservations.iter()
+        .filter(|reservation| reservation.user_id == user.id && reservation.id != reservation_id)
+        .fold(0_u64, |total, reservation| total.saturating_add(reservation.bytes));
     if !quota_override && storage_quota_limit(user)
         .is_some_and(|limit| used.saturating_add(reserved).saturating_add(bytes) > limit)
     {
         return false;
     }
+    // Replace only after validation, so rejection preserves the previous hold.
+    ledger.reservations.retain(|reservation| reservation.id != reservation_id);
     ledger.reservations.push(StorageReservation {
         id: reservation_id.to_owned(),
         user_id: user.id,
@@ -18147,11 +18151,12 @@ async fn queue_ytdlp_download(
         let _guard = state.persistence_lock.lock().await;
         let mut ledger = read_storage_ledger(&state.storage_path).await;
         reconcile_storage_ledger(&state, &mut ledger).await;
+        let original_ledger = ledger.clone();
         let quota = storage_quota_response(&user, &ledger);
         let reserve = inspection
             .estimated_bytes
             .unwrap_or_else(|| quota.available_bytes.unwrap_or(0));
-        if user.storage_quota_bytes.is_some() && reserve == 0 {
+        if storage_quota_limit(&user).is_some() && reserve == 0 {
             return Err((
                 StatusCode::INSUFFICIENT_STORAGE,
                 Json(serde_json::json!({ "message": "Your server storage quota is full." })),
@@ -18166,28 +18171,29 @@ async fn queue_ytdlp_download(
             ));
         }
         job.reserved_bytes = reserve;
-        write_storage_ledger(&state.storage_path, &ledger)
-            .await
-            .map_err(|status| {
-                (
-                    status,
-                    Json(serde_json::json!({ "message": "Could not reserve server storage." })),
-                )
-            })?;
         let mut jobs = read_ytdlp_jobs(&state.download_jobs_path).await;
         jobs.jobs.push(job.clone());
-        write_ytdlp_jobs(&state.download_jobs_path, &jobs)
-            .await
-            .map_err(|status| {
-                (
-                    status,
-                    Json(serde_json::json!({ "message": "Could not save the download job." })),
-                )
-            })?;
+        write_reserved_ytdlp_jobs(&state.storage_path, &state.download_jobs_path, &original_ledger, &ledger, &jobs)
+            .await.map_err(|status| (status, Json(serde_json::json!({ "message": "Could not save the download job and its storage reservation." }))))?;
     }
     state.ytdlp_notify.notify_one();
     tracing::info!(event = "ytdlp_download_queued", user = %user.name, job_id = %job.id, title = %job.title, destination = %job.destination_path, mode = %job.mode, extractor = %job.extractor, "yt-dlp job queued");
     Ok((StatusCode::ACCEPTED, Json(job)))
+}
+
+async fn write_reserved_ytdlp_jobs(
+    storage_path: &Path,
+    jobs_path: &Path,
+    previous: &StorageLedger,
+    reserved: &StorageLedger,
+    jobs: &YtDlpJobs,
+) -> Result<(), StatusCode> {
+    write_storage_ledger(storage_path, reserved).await?;
+    if let Err(problem) = write_ytdlp_jobs(jobs_path, jobs).await {
+        write_storage_ledger(storage_path, previous).await?;
+        return Err(problem);
+    }
+    Ok(())
 }
 
 async fn clean_orphaned_ytdlp_staging(state: &AppState, active_job_ids: &[String]) {
@@ -18397,7 +18403,7 @@ async fn control_ytdlp_download(
                 let bytes = job
                     .estimated_bytes
                     .unwrap_or_else(|| quota.available_bytes.unwrap_or(0));
-                if owner.storage_quota_bytes.is_some() && bytes == 0
+                if storage_quota_limit(&owner).is_some() && bytes == 0
                     || !reserve_storage(&mut ledger, &owner, &job.id, "yt-dlp", bytes)
                 {
                     return Err((
@@ -18516,31 +18522,14 @@ async fn ensure_ytdlp_reservation(
         .iter()
         .find(|user| user.id == job.user_id)
         .ok_or_else(|| "The job owner no longer exists.".to_owned())?;
-    if job.reserved_bytes == 0 && user.storage_quota_bytes.is_none() {
+    if job.reserved_bytes == 0 && storage_quota_limit(user).is_none() {
         return Ok(());
     }
     let mut ledger = read_storage_ledger(&state.storage_path).await;
-    let Some(reservation) = ledger
-        .reservations
-        .iter_mut()
-        .find(|reservation| reservation.id == job.id)
-    else {
+    if !ledger.reservations.iter().any(|reservation| reservation.id == job.id) {
         return Err("The job storage reservation is missing.".to_owned());
-    };
-    let previous = reservation.bytes;
-    reservation.bytes = bytes;
-    let (used, reserved) = storage_usage(&ledger, user.id);
-    if user
-        .storage_quota_bytes
-        .is_some_and(|limit| used.saturating_add(reserved) > limit)
-    {
-        if let Some(reservation) = ledger
-            .reservations
-            .iter_mut()
-            .find(|reservation| reservation.id == job.id)
-        {
-            reservation.bytes = previous;
-        }
+    }
+    if !reserve_storage(&mut ledger, user, &job.id, "yt-dlp", bytes) {
         return Err("This download reached your server storage quota.".to_owned());
     }
     write_storage_ledger(&state.storage_path, &ledger)

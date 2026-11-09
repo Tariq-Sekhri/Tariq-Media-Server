@@ -117,13 +117,17 @@ pub(super) fn auto_picking(r: &Request) -> bool {
 fn needs_download_cleanup(r: &Request) -> bool {
     r.hash.is_some() || r.torrent_hash.is_some() || r.submitted || r.search_started
 }
-fn purge_closed(queue: &mut Queue) -> bool {
-    let before = queue.requests.len();
+async fn purge_closed(state: &AppState, queue: &mut Queue) -> Result<bool, (StatusCode, Json<Value>)> {
+    let removed: Vec<_> = queue.requests.iter().filter(|r| closed(&r.status)).cloned().collect();
+    for row in &removed { arr::release_request_reservation(state, row).await?; }
     queue.requests.retain(|r| !closed(&r.status));
-    before != queue.requests.len()
+    Ok(!removed.is_empty())
 }
 pub async fn remove(state: &AppState, id: &str) -> Result<(), (StatusCode, Json<Value>)> {
     let mut queue: Queue = load(state, "discovery-requests.json").await?;
+    for row in queue.requests.iter().filter(|r| r.id == id) {
+        arr::release_request_reservation(state, row).await?;
+    }
     queue.requests.retain(|r| r.id != id);
     save(state, &queue).await
 }
@@ -249,7 +253,7 @@ async fn list(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Va
     let libraries = read_libraries(&state).await;
     let users = read_users(&state.users_path).await;
     let mut queue: Queue = load(&state, "discovery-requests.json").await?;
-    if purge_closed(&mut queue) {
+    if purge_closed(&state, &mut queue).await? {
         save(&state, &queue).await?;
     }
     let rows: Vec<_> = queue
@@ -669,7 +673,7 @@ async fn action(
     } else if let Some(r) = queue.requests.iter_mut().find(|r| r.id == id) {
         r.updated_at = unix_now();
     }
-    purge_closed(&mut queue);
+    purge_closed(&state, &mut queue).await?;
     save(&state, &queue).await?;
     if let Some((tmdb_id, library, owner_id, subscribers)) = follow {
         if let Err((_, Json(problem))) = subscriptions::follow_airing(&state, tmdb_id, &library, owner_id, &subscribers).await {
@@ -727,7 +731,7 @@ pub(super) async fn finish_download_handoff(state: &AppState, r: &Request, seaso
 }
 async fn reconcile_manual(state: &AppState) -> Result<(), (StatusCode, Json<Value>)> {
     let mut queue: Queue = load(state, "discovery-requests.json").await?;
-    let mut changed = purge_closed(&mut queue);
+    let mut changed = purge_closed(state, &mut queue).await?;
     if !queue
         .requests
         .iter()
@@ -825,11 +829,14 @@ async fn reconcile_manual(state: &AppState) -> Result<(), (StatusCode, Json<Valu
     // watcher, which stops and removes the qBittorrent torrent. A request is
     // only queue state, so do not leave a completed download in this list.
     let before = queue.requests.len();
+    for row in queue.requests.iter().filter(|r| r.status == "ready") {
+        arr::release_request_reservation(state, row).await?;
+    }
     queue.requests.retain(|r| r.status != "ready");
     if queue.requests.len() != before {
         changed = true;
     }
-    if purge_closed(&mut queue) {
+    if purge_closed(&state, &mut queue).await? {
         changed = true;
     }
     if !additions.is_empty() {
