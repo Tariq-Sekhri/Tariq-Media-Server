@@ -106,7 +106,7 @@ const sectionCopy: Record<AdminSection, { title: string }> = {
   processes: { title: "Running work" },
   locations: { title: "Library locations" },
   libraries: { title: "Libraries" },
-  downloads: { title: "Server downloads" },
+  downloads: { title: "yt-dlp" },
   trash: { title: "Trash" },
 };
 const libraryTypes: { value: LibraryContentType; label: string }[] = [
@@ -142,7 +142,7 @@ const accountPermissions: { key: keyof AdminPermissions; label: string; descript
   { key: "view_logs", label: "View metrics", description: "See client performance and load-time metrics" },
   { key: "view_processes", label: "View running work", description: "See active downloads, FFmpeg work, and server jobs across users" },
   { key: "manage_libraries", label: "Manage libraries", description: "Create, configure, and remove libraries" },
-  { key: "manage_downloads", label: "Manage server downloads", description: "Manage yt-dlp and download pacing" },
+  { key: "manage_downloads", label: "Manage yt-dlp", description: "Manage yt-dlp and download pacing" },
   { key: "logout_other_users", label: "Log out other users", description: "View and revoke remembered devices for non-admin accounts" },
   { key: "logout_admins", label: "Log out administrators", description: "View and revoke devices for any account, including administrators" },
 ];
@@ -1223,7 +1223,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
         )}
         {canManageDownloads && (
           <div style={{ display: "contents" }}>
-            <button className={section === "downloads" ? "active" : ""} aria-current={section === "downloads" ? "page" : undefined} onClick={() => setSection("downloads")}><span aria-hidden="true">↓</span>Server downloads</button>
+            <button className={section === "downloads" ? "active" : ""} aria-current={section === "downloads" ? "page" : undefined} onClick={() => setSection("downloads")}><span aria-hidden="true">↓</span>yt-dlp</button>
           </div>
         )}
         {currentUser?.is_admin && <button className={section === "trash" ? "active" : ""} aria-current={section === "trash" ? "page" : undefined} onClick={() => setSection("trash")}><span aria-hidden="true">♲</span>Trash</button>}
