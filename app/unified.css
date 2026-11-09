@@ -7144,9 +7144,9 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 }
 
 /* The native select covers the Sort label, opening its options on the first click. */
-.unified-layout .hub-folder-rail .collection-sort-control { position: relative; display: grid; place-items: center; min-width: 44px; min-height: 32px; margin: 0; border-radius: 6px; color: #c4cbd5; font-size: 13px; cursor: pointer; }
+.unified-layout .hub-folder-rail .collection-sort-control { position: relative; display: grid; place-items: center; min-width: 44px; height: 24px; min-height: 24px; margin: 0; padding: 0; box-sizing: border-box; border-radius: 4px; color: #c4cbd5; font-size: 13px; line-height: 20px; cursor: pointer; }
 .unified-layout .hub-folder-rail .collection-sort-control:hover { background: #242a31; color: #fff; }
-.unified-layout .hub-folder-rail .collection-sort-control:focus-within { outline: 2px solid #b6a3ff; outline-offset: 2px; }
+.unified-layout .hub-folder-rail .collection-sort-control:focus-within { outline: 2px solid #b6a3ff; outline-offset: 1px; }
 .unified-layout .hub-folder-rail .collection-sort-control > span { pointer-events: none; }
 .unified-layout .hub-folder-rail .collection-sort-control > select { position: absolute; inset: 0; width: 100%; height: 100%; min-width: 0; min-height: 0; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; font-size: 14px; color: #e6e8ed; background: #202631; }
 @media (max-width: 760px) { .unified-layout .hub-folder-rail .collection-sort-control { min-height: 48px; font-size: 14px; } }
