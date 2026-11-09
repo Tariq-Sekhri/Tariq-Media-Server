@@ -1289,8 +1289,6 @@ export default function AdminDashboard() {
               let totalCount = 0;
               let sumCacheTime = 0;
               let sumServerLoadTime = 0;
-              let latestCacheSizeBytes: number | null = null;
-              let latestCacheSizeTimestamp = -1;
 
               const cacheTimes: number[] = [];
               const apiTimes: number[] = [];
@@ -1310,10 +1308,6 @@ export default function AdminDashboard() {
                     if (["media_delete", "media_move", "media_rename", "trash_empty"].includes(phase) && typeof details.outcome === "string") {
                       const duration = Number(logValue(line, "duration_ms"));
                       if (Number.isFinite(duration)) mediaActions.push({ phase, durationMs: duration, outcome: details.outcome === "error" ? "error" : "success" });
-                    }
-                    if (typeof details.cache_size_bytes === "number" && time >= latestCacheSizeTimestamp) {
-                      latestCacheSizeBytes = details.cache_size_bytes;
-                      latestCacheSizeTimestamp = time;
                     }
                     
                     if (phase === "library_load_complete") {
@@ -1480,12 +1474,6 @@ export default function AdminDashboard() {
                     <div style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--brand)', marginTop: '0.25rem' }}>99th Percentile: {p99Cache.toFixed(1)}ms</div>
                     <div style={{ fontSize: '0.85rem', opacity: 0.5, marginTop: '0.5rem', flex: 1 }}>Client IndexedDB read time (Network-free)</div>
                     <Sparkline dataKey="cache" color="#3b82f6" p99={p99Cache} />
-                  </div>
-
-                  <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ fontSize: '0.85rem', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Library Cache Size</div>
-                    <div style={{ fontSize: '2.5rem', fontWeight: 600 }}>{latestCacheSizeBytes === null ? "—" : formatBytes(latestCacheSizeBytes)}</div>
-                    <div style={{ fontSize: '0.85rem', opacity: 0.5, marginTop: '0.5rem', flex: 1 }}>Latest serialized IndexedDB library cache for the selected device class</div>
                   </div>
 
                   <div className="admin-metric-card" style={{ background: 'var(--surface-sunken)', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>

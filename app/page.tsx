@@ -2264,12 +2264,6 @@ export default function Home() {
         reportClientPerformance("library_server_load", performance.now() - loadStarted, {
           cache_hit: Boolean(cached),
           cache_read_ms: Math.round(cacheReadMs),
-          // This is the serialized IndexedDB record size, so it reflects the
-          // actual per-user library cache payload rather than disk quota.
-          // Do not stringify the recursive library cache on the UI thread just
-          // for telemetry. IndexedDB owns the durable cache size and the full
-          // serialization used to freeze Favorites while a refresh completed.
-          cache_size_bytes: null,
           api_wait_ms: Math.round(apiWaitMs),
           folder: currentFolder || "root",
           entries: entries.length,
