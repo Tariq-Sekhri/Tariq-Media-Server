@@ -28,7 +28,8 @@ function mount() {
     body, original, scrolls, cleanup: () => cleanup(),
     show(menu) {
       document.dialogs = menu === null ? [] : [{
-        getClientRects: () => [1], matches: () => menu,
+        getClientRects: () => [1],
+        matches: (selector) => selector.split(',').some((part) => part.trim() === `.${menu === true ? 'card-menu' : menu}`),
         focus() {}, setAttribute() {}, hasAttribute: () => true,
       }];
       update();
@@ -36,15 +37,17 @@ function mount() {
   };
 }
 
-test('opening and closing an item menu leaves body sizing and scroll untouched', () => {
+for (const menu of ['card-menu', 'folder-tools-menu', 'account-popover', 'folder-context-menu']) {
+test(`opening and closing ${menu} leaves body sizing and scroll untouched`, () => {
   const app = mount();
-  app.show(true);
+  app.show(menu);
   assert.deepEqual(app.body.style, app.original);
   app.show(null);
   app.cleanup();
   assert.deepEqual(app.body.style, app.original);
   assert.deepEqual(app.scrolls, []);
 });
+}
 
 test('menu to dialog and dialog to menu transitions restore the original layout', () => {
   const app = mount();

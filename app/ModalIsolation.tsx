@@ -44,7 +44,7 @@ export default function ModalIsolation() {
       reconcileModalInert(hidden, desired);
       // Context menus float over the current layout. Fixing the body can
       // change the grid's available width and reflow the cards underneath.
-      const shouldLockScroll = Boolean(next && !next.matches(".card-menu"));
+      const shouldLockScroll = Boolean(next && !next.matches(".card-menu, .folder-tools-menu, .account-popover, .folder-context-menu"));
       if (shouldLockScroll && !scrollLocked) {
         scrollY = window.scrollY;
         previousOverflow = document.body.style.overflow;
