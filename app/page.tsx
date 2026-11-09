@@ -5802,7 +5802,7 @@ export default function Home() {
             {isDownloaded || offlineBundles.some((bundle) => bundle.path === mediaPath(item) && bundle.status === "ready") ? <><MenuIcon name="check" />Available offline</> : <><MenuIcon name="offline" />Save offline on this device</>}
           </button>
         )}
-        <details className="media-management"><summary><MenuIcon name="chevronRight" />Organize & file actions</summary>
+        <div className="media-management">
         {!item.offline && !item.trashed && item.parent && (section !== "library" || activeSearch.trim()) && (
           <button onClick={() => {
             navigateApp(`/?${new URLSearchParams({ folder: item.parent! })}`);
@@ -5884,7 +5884,7 @@ export default function Home() {
             <MenuIcon name="rename" />Rename
           </button>
         )}
-        </details>
+        </div>
         {(item.kind !== "folder" && (canDeleteItem(item) || isDownloaded)) && (
           <button
             className="danger"

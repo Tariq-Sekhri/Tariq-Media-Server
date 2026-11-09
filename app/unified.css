@@ -6735,10 +6735,6 @@ body .discover-title-dialog .discover-dialog-header { position: static; flex: 0 
 /* Whole destination windows and compact contextual controls. */
 .mobile-navigation-shell { display: none; }
 .media-management { border-top: 1px solid #454052; margin-top: 8px; padding-top: 4px; }
-.media-management > summary { padding: 0 16px; min-height: 48px; align-content: center; cursor: pointer; color: #d1c9e4; }
-.media-management > summary { display: flex; align-items: center; gap: 8px; list-style: none; }
-.media-management > summary::-webkit-details-marker { display: none; }
-.media-management[open] > summary > svg { transform: rotate(90deg); }
 .card-menu > .danger { border-top: 1px solid #65414d; margin-top: 8px; }
 @media (max-width: 760px) {
  body:has(.mobile-navigation-shell) { --mobile-navigation-height: 64px; --mobile-navigation-space: calc(var(--mobile-navigation-height) + 1px + env(safe-area-inset-bottom, 0px)); }
@@ -7000,8 +6996,7 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
  .unified-layout .hub-folder-rail .folder-rail-head { display: flex; gap: 8px; }
  .unified-layout .hub-folder-rail .rail-collapse-toggle { flex: 0 0 32px; width: 32px; height: 32px; min-height: 32px; padding: 0; display: grid; place-items: center; }
  .unified-layout .card-menu { width: 264px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 88px); overflow-y: auto; overscroll-behavior: contain; }
- .unified-layout .card-menu button,
- .unified-layout .card-menu .media-management > summary { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 8px 10px; font-size: 14px; line-height: 1.35; }
+ .unified-layout .card-menu button { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 8px 10px; font-size: 14px; line-height: 1.35; }
  .unified-layout .card-menu .menu-icon { flex: 0 0 18px; width: 18px; height: 18px; }
  body .discover-backdrop { padding: 24px; overflow: hidden; box-sizing: border-box; align-items: center; }
  body .discover-backdrop .discover-title-dialog { display: flex; flex-direction: column; padding: 0; margin: 0; width: min(900px,100%); max-height: calc(100dvh - 48px); min-width: 0; overflow: hidden; box-sizing: border-box; }
