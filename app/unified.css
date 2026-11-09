@@ -7302,7 +7302,7 @@ thead .lib-tabs-person { background: #12171b; }
 @media (max-width: 900px) { .admin-requests-columns { grid-template-columns: 1fr; gap: 28px; } }
 
 /* Users: no card, content sits on the page background. */
-.admin-users-surface { border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.admin-users-surface { max-width: none; margin-left: 0; margin-right: 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }
 .admin-users-surface > header { padding: 0 0 14px; border-bottom: 0; }
 .admin-users-surface > footer { padding: 13px 0; background: transparent; }
 .admin-users-surface .admin-user-table-head,
