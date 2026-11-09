@@ -5327,7 +5327,7 @@
 .admin-account-type { color: #89939a; font-size: 9px; font-weight: 750; }.admin-account-type.admin { color: #a997ff; }
 .admin-account-type.limited { color: #6db6d7; }
 .admin-row-action { border: 1px solid #343b43; border-radius: 6px; padding: 6px 8px; background: #181d22; color: #aeb6bc; font-size: 8px; font-weight: 800; cursor: pointer; }
-.admin-panel-empty { display: flex; min-height: 210px; align-items: center; justify-content: center; flex-direction: column; gap: 7px; padding: 28px; color: #68727a; text-align: center; }.admin-panel-empty > span { color: #7766da; font-size: 25px; }.admin-panel-empty b { color: #cdd2d5; font-size: 11px; }.admin-panel-empty p { max-width: 260px; margin: 0; font-size: 9px; line-height: 1.5; }.admin-panel-empty button { margin-top: 7px; border: 1px solid #3a424a; border-radius: 7px; padding: 8px 10px; background: #181d22; color: #cdd2d5; font-size: 9px; cursor: pointer; }.admin-loader { animation: admin-spin 1s linear infinite; }
+.admin-panel-empty { display: flex; min-height: 210px; align-items: center; justify-content: center; flex-direction: column; gap: 7px; padding: 28px; color: #68727a; text-align: center; }.admin-panel-empty > span { color: #7766da; font-size: 25px; }.admin-panel-empty b { color: #cdd2d5; font-size: 11px; }.admin-panel-empty p { max-width: 260px; margin: 0; font-size: 9px; line-height: 1.5; }.admin-panel-empty button { margin-top: 7px; border: 1px solid #3a424a; border-radius: 7px; padding: 8px 10px; background: #181d22; color: #cdd2d5; font-size: 9px; cursor: pointer; }
 .admin-user-error { margin: 13px 20px; border: 1px solid #63363b; border-radius: 7px; padding: 9px 11px; background: #281719; color: #ec979f; font-size: 9px; }
 .admin-page-error { max-width: 1280px; margin: 20px auto 0; border: 1px solid #63363b; border-radius: 8px; padding: 10px 12px; background: #281719; color: #ec979f; font-size: 10px; }
 .admin-section-surface,.admin-library-list { max-width: 1280px; margin: 28px auto 0; }
@@ -7335,3 +7335,11 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 /* Libraries: keep the workspace closer to its left edge. */
 .admin-workspace:has(> .lib-opt-split) { padding-left: clamp(8px, 1.333333vw, 19.333333px); }
 @media (max-width: 760px) { .admin-workspace:has(> .lib-opt-split) { padding-left: calc(14px / 3); } }
+
+/* Shared loading state for admin pages, dialogs, and inline fetches. */
+.admin-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; min-height: 180px; gap: 14px; padding: 24px 16px; color: #c9cdd5; font: inherit; font-size: 14px; line-height: 1.5; text-align: center; }
+.admin-loading-spinner { display: block; flex: none; width: 32px; height: 32px; color: #a38ce8; }
+.admin-loading-arc { transform-origin: 16px 16px; animation: admin-spin .9s linear infinite; }
+.admin-loading.is-inline { display: inline-flex; flex-direction: row; justify-content: flex-start; width: auto; min-height: 40px; gap: 10px; padding: 0; text-align: left; }
+.admin-loading.is-inline .admin-loading-spinner,.admin-page-header-actions .admin-loading-spinner { width: 20px; height: 20px; }
+@media (prefers-reduced-motion: reduce) { .admin-loading-arc { animation: none; } }

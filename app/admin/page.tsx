@@ -8,6 +8,7 @@ import type { YtDlpJob } from "../ServerDownloadDialog";
 import { isActiveWork, isFinishedWork, needsWorkAttention, showWork, workTitle } from "../lib/running-work";
 import MenuIcon from "../MenuIcon";
 import AdminTrash from "./Trash";
+import AdminLoading, { AdminSpinner } from "./AdminLoading";
 import LibrariesOptions from "./LibrariesOptions";
 import MobileNavigation from "../MobileNavigation";
 import { mainNavigation } from "../lib/navigation";
@@ -1170,7 +1171,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
             {section === "metrics" && currentUser?.is_admin && <button type="button" className="admin-clear-metrics-action" disabled={loading || clearingMetrics} onClick={() => void clearMetrics()}>{clearingMetrics ? "Wiping…" : "Wipe all metrics"}</button>}
             {section === "locations" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={openAddLocation}>Add folder</button>}
             {section === "libraries" && canManageLibraries && <button className="admin-primary-action" type="button" onClick={() => setShowCreateLibrary(true)}>Create library</button>}
-            {section !== "processes" && section !== "trash" && <button type="button" aria-label={loading ? "Refreshing" : "Refresh"} onClick={() => void refresh()} disabled={loading || clearingMetrics}><MenuIcon name="restore" />{loading ? "Refreshing" : "Refresh"}</button>}
+            {section !== "processes" && section !== "trash" && <button type="button" aria-label={loading ? "Refreshing" : "Refresh"} onClick={() => void refresh()} disabled={loading || clearingMetrics}>{loading ? <AdminSpinner /> : <MenuIcon name="restore" />}{loading ? "Refreshing" : "Refresh"}</button>}
   </>;
   const Root = embedded ? "div" : "main";
   return <Root className={`admin-shell${embedded ? " admin-embedded" : ""}`}>
@@ -1258,7 +1259,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
         </section>
         <section className="admin-requests-deletions">
         <h2>Deletion requests</h2>
-        {loading ? <p className="admin-requests-empty">Loading requests…</p> : deleteRequests.length ? <div className="admin-delete-requests">
+        {loading ? <AdminLoading label="Loading requests" /> : deleteRequests.length ? <div className="admin-delete-requests">
           {deleteRequests.map((entry) => <div className="admin-delete-request" key={entry.id}>
             <div><b>{entry.path.split("/").pop()}</b><small>{entry.path}</small><span>Requested by {entry.requested_by_name} · {new Date(entry.requested_at * 1000).toLocaleString()}</span></div>
             <div className="admin-delete-request-actions">
@@ -1276,14 +1277,14 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
 
       {section === "users" && <article className="admin-surface admin-users-surface admin-section-surface">
         <div className="admin-user-table-head"><span>User</span><span>Access</span><span>Password</span><span>Created</span><span>Last active</span><span /></div>
-        {loading ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading users</b></div> : users.length ? <div className="admin-user-table">{users.map((user) => <div className="admin-user-row" key={user.id}><div className="admin-user-identity"><span>{user.name.slice(0, 2).toUpperCase()}</span><div><b>{user.name}</b><small>{formatBytes(user.used_bytes)} used · {formatBytes(user.storage_quota_bytes)}</small></div></div><span className={`admin-account-type ${user.is_admin ? "admin" : user.admin_permissions?.access_admin_panel ? "limited" : ""}`}>{accountType(user)}</span><span className={`admin-password-state ${user.password_set ? "set" : "open"}`}><i />{user.password_set ? "Protected" : "No password"}</span><time>{formatCreatedDate(user.created_at)}</time><time>{user.last_active_at ? formatCreatedDate(user.last_active_at) : "Never"}</time><span className="admin-row-actions">{canManageSessionsFor(user) && <button className="admin-row-action" onClick={() => void openUserSessions(user)}>Devices</button>}{canManageUser(user) && <button className="admin-row-action" onClick={() => openUserEditor(user)}>Manage</button>}</span></div>)}</div> : <div className="admin-panel-empty"><span>♙</span><b>No users yet</b>{canCreateUsers && <button onClick={() => setShowAddUser(true)}>Add your first user</button>}</div>}
+        {loading ? <AdminLoading label="Loading users" /> : users.length ? <div className="admin-user-table">{users.map((user) => <div className="admin-user-row" key={user.id}><div className="admin-user-identity"><span>{user.name.slice(0, 2).toUpperCase()}</span><div><b>{user.name}</b><small>{formatBytes(user.used_bytes)} used · {formatBytes(user.storage_quota_bytes)}</small></div></div><span className={`admin-account-type ${user.is_admin ? "admin" : user.admin_permissions?.access_admin_panel ? "limited" : ""}`}>{accountType(user)}</span><span className={`admin-password-state ${user.password_set ? "set" : "open"}`}><i />{user.password_set ? "Protected" : "No password"}</span><time>{formatCreatedDate(user.created_at)}</time><time>{user.last_active_at ? formatCreatedDate(user.last_active_at) : "Never"}</time><span className="admin-row-actions">{canManageSessionsFor(user) && <button className="admin-row-action" onClick={() => void openUserSessions(user)}>Devices</button>}{canManageUser(user) && <button className="admin-row-action" onClick={() => openUserEditor(user)}>Manage</button>}</span></div>)}</div> : <div className="admin-panel-empty"><span>♙</span><b>No users yet</b>{canCreateUsers && <button onClick={() => setShowAddUser(true)}>Add your first user</button>}</div>}
       </article>}
 
                   {section === "metrics" && (
         <article className="admin-surface admin-section-surface admin-metrics-surface">
           {metricsClearMessage && <p className="admin-metrics-clear-message" role="status">{metricsClearMessage}</p>}
           {loading ? (
-            <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading metrics</b></div>
+            <AdminLoading label="Loading metrics" />
           ) : (
             (() => {
               let totalCacheHit = 0;
@@ -1541,7 +1542,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
           {(processRefreshError || (processUpdatedAt !== null && processClock - processUpdatedAt > 15_000)) && <div className="admin-work-feedback" aria-live="polite">
             <strong role="status">{processRefreshError || "Live status is delayed"}. Displayed work may be outdated.</strong>
           </div>}
-          {loading ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading running work</b></div> : processes.some((process) => showWork(process.status, showFinishedWork)) ? <div className="admin-process-list">{processes.filter((process) => showWork(process.status, showFinishedWork)).map((process) => {
+          {loading ? <AdminLoading label="Loading running work" /> : processes.some((process) => showWork(process.status, showFinishedWork)) ? <div className="admin-process-list">{processes.filter((process) => showWork(process.status, showFinishedWork)).map((process) => {
             const isYtDlp = process.id.startsWith("ytdlp:");
             const isFailed = needsWorkAttention(process.status);
             const isLive = isActiveWork(process.status);
@@ -1687,7 +1688,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
                 </button>
               </a>
             </h2>
-            <code>{libraryLocations?.main_root ?? "Loading…"}</code>
+            {libraryLocations ? <code>{libraryLocations.main_root}</code> : <AdminLoading label="Loading location" inline />}
           </div>
           <span className={`admin-location-status ${libraryLocations?.main_root_available ? "online" : "offline"}`}><i />{libraryLocations?.main_root_available ? "Available" : "Unavailable"}</span>
           {currentUser?.is_admin && <details className="admin-location-move">
@@ -1698,7 +1699,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
             <p>TMS stays offline during the move. An interrupted switch must be recovered with <code>-Recover</code> before starting it again. See <code>docs/relocating-tms.md</code> for the full procedure.</p>
           </details>}
         </article>
-        {loading && !libraryLocations ? <article className="admin-surface admin-section-surface"><div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading library locations</b></div></article> : libraryLocations?.locations.filter((location) => location.external).map((location) => {
+        {loading && !libraryLocations ? <article className="admin-surface admin-section-surface"><AdminLoading label="Loading library locations" /></article> : libraryLocations?.locations.filter((location) => location.external).map((location) => {
           const targetFolder = location.parent_library
             ? (location.folder_path ? `${location.parent_library}/${location.folder_path}` : location.parent_library)
             : location.name;
@@ -1730,7 +1731,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
       {section === "downloads" && <div className="admin-library-list">
         <article className="admin-surface admin-library-card">
           <header><div><p>QUOTA OVERVIEW</p><h2>Per-user server storage</h2></div></header>
-          <div className="admin-quota-list">{users.length ? users.map((user) => <div key={user.id}><div><b>{user.name}</b><span>{formatBytes(user.used_bytes)} used · {formatBytes(user.reserved_bytes)} reserved · {formatBytes(user.storage_quota_bytes)}</span></div><progress max={Math.max(1, user.storage_quota_bytes ?? Math.max(1, user.used_bytes + user.reserved_bytes))} value={user.used_bytes + user.reserved_bytes} /></div>) : <p role="status">{loading ? "Loading storage usage…" : "No user storage usage available."}</p>}</div>
+          <div className="admin-quota-list">{users.length ? users.map((user) => <div key={user.id}><div><b>{user.name}</b><span>{formatBytes(user.used_bytes)} used · {formatBytes(user.reserved_bytes)} reserved · {formatBytes(user.storage_quota_bytes)}</span></div><progress max={Math.max(1, user.storage_quota_bytes ?? Math.max(1, user.used_bytes + user.reserved_bytes))} value={user.used_bytes + user.reserved_bytes} /></div>) : loading ? <AdminLoading label="Loading storage usage" /> : <p role="status">No user storage usage available.</p>}</div>
         </article>
         <article className="admin-surface admin-library-card">
           <header><div><p>DOWNLOAD PACING</p><h2>yt-dlp throttling</h2></div>{throttleSaveState && <span className="admin-library-save-status" role="status">{throttleSaveState === "saving" ? "Saving…" : "Saved"}</span>}</header>
@@ -1932,7 +1933,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
       </div>}
 
       {section === "libraries" && (loading || !Object.keys(libraries).length ? <article className="admin-surface admin-section-surface">
-        {loading ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading libraries</b></div> : <div className="admin-panel-empty"><span>▣</span><b>No libraries yet</b>{canManageLibraries && <button type="button" onClick={() => setShowCreateLibrary(true)}>Create your first library</button>}</div>}
+        {loading ? <AdminLoading label="Loading libraries" /> : <div className="admin-panel-empty"><span>▣</span><b>No libraries yet</b>{canManageLibraries && <button type="button" onClick={() => setShowCreateLibrary(true)}>Create your first library</button>}</div>}
       </article> : <LibrariesOptions libraries={libraries} users={users} types={libraryTypes} permissions={libraryPermissions} presetOf={libraryMemberPreset} presetLabel={libraryPresetLabel} update={updateLibraryDraft} setPreset={(path, name, preset) => preset === "none" ? toggleLibraryMember(path, name, false) : applyLibraryPreset(path, name, preset)} setPermission={setLibraryPermission} runTrickplay={(path) => void runTrickplayNow(path)} trickplayAction={trickplayAction} savingLibrary={savingLibrary} savedLibrary={savedLibrary} />)}
     </section>
 
@@ -1953,7 +1954,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
         <div className="admin-location-path-row"><label><span>Folder path</span><input autoFocus required value={locationPath} onChange={(event) => setLocationPath(event.target.value)} placeholder="Choose a drive and folder below, or enter an absolute path" /></label>{isLocalHost() && <button type="button" disabled={pickingFolder || browsingFolders} onClick={() => void pickLocalFolder()}>{pickingFolder ? "Opening…" : "Pick folder"}</button>}</div>
         <section className="admin-folder-browser" aria-label="Server folder picker">
           <header><button type="button" disabled={browsingFolders || (!folderBrowser?.parent_path && folderBrowser?.current_path === null)} onClick={() => void browseLocation(folderBrowser?.parent_path ?? undefined)}>{folderBrowser?.current_path ? <><MenuIcon name="folderUp" />Up</> : "Drives"}</button><code>{folderBrowser?.current_path ?? "Available drives"}</code><button type="button" disabled={browsingFolders} onClick={() => void browseLocation()}>All drives</button></header>
-          <div>{browsingFolders && !folderBrowser ? <span className="admin-folder-browser-empty">Loading folders…</span> : folderBrowser?.folders.length ? folderBrowser.folders.map((folder) => <button type="button" key={folder.path} onClick={() => void browseLocation(folder.path)}><span>▰</span><b>{folder.name}</b><small>{folder.path}</small></button>) : <span className="admin-folder-browser-empty">No folders inside this location.</span>}</div>
+          <div>{browsingFolders && !folderBrowser ? <AdminLoading label="Loading folders" inline /> : folderBrowser?.folders.length ? folderBrowser.folders.map((folder) => <button type="button" key={folder.path} onClick={() => void browseLocation(folder.path)}><span>▰</span><b>{folder.name}</b><small>{folder.path}</small></button>) : <span className="admin-folder-browser-empty">No folders inside this location.</span>}</div>
         </section>
         {locationMode === "library" ? <div className="admin-location-form-grid"><label><span>Library name</span><input required maxLength={80} value={locationName} onChange={(event) => setLocationName(event.target.value)} placeholder="How this appears in TMS" /></label><label><span>Library type</span><select value={locationContentType} onChange={(event) => setLocationContentType(event.target.value as LibraryContentType)}>{libraryTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label></div> : <div className="admin-location-form-grid"><label><span>Shortcut folder name</span><input required maxLength={80} value={locationName} onChange={(event) => setLocationName(event.target.value)} placeholder="How it appears inside the library" /></label><label><span>Destination library</span><select required value={destinationLibrary} onChange={(event) => setDestinationLibrary(event.target.value)}><option value="">Choose a library…</option>{Object.keys(libraries).map((library) => <option key={library} value={library}>{library}</option>)}</select></label><label className="admin-location-folder-target"><span>Inside folder <small>Optional</small></span><input value={destinationFolder} onChange={(event) => setDestinationFolder(event.target.value)} placeholder="e.g. Shows/Comedy (must already exist)" /><small>Leave blank to add it at the top of the selected library.</small></label></div>}
         <div className="admin-user-modal-actions"><button type="button" onClick={closeAddLocation}>Cancel</button><button className="primary" type="submit" disabled={!locationName.trim() || !locationPath.trim() || (locationMode === "folder" && !destinationLibrary) || creatingLocation}>{creatingLocation ? "Adding…" : locationMode === "library" ? "Add as library" : "Add folder shortcut"}</button></div>
@@ -1991,7 +1992,7 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
     {sessionUser && <div className="admin-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !revokingSession) setSessionUser(null); }}><section className="admin-user-modal admin-user-modal-wide admin-device-modal" role="dialog" aria-modal="true" aria-label={`Devices for ${sessionUser.name}`}>
       <div className="admin-user-modal-head"><div><p>REMEMBERED DEVICES</p><h2>{sessionUser.name}</h2></div><button type="button" aria-label="Close remembered devices" onClick={() => setSessionUser(null)}>×</button></div>
       <p>Removing a device ends that session immediately. {sessionUser.is_admin ? "This account is an administrator." : ""}</p>
-      {loadingSessions ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading devices</b></div> : <div className="settings-session-list admin-session-list">{userSessions.length ? userSessions.map((session) => <div className="settings-session-row" key={session.token}><div className="settings-session-icon">◉</div><div><b>{session.device}</b><small>Signed in {formatCreatedDate(session.created_at)}{session.ip_address ? ` · ${session.ip_address}` : ""}</small><small className="settings-user-agent">{session.user_agent || "Device details unavailable"}</small></div><button className="danger" disabled={Boolean(revokingSession)} onClick={() => void revokeUserSession(session)}>{revokingSession === session.token ? "Logging out…" : "Log out device"}</button></div>) : <div className="admin-panel-empty"><b>No active devices</b></div>}</div>}
+      {loadingSessions ? <AdminLoading label="Loading devices" /> : <div className="settings-session-list admin-session-list">{userSessions.length ? userSessions.map((session) => <div className="settings-session-row" key={session.token}><div className="settings-session-icon">◉</div><div><b>{session.device}</b><small>Signed in {formatCreatedDate(session.created_at)}{session.ip_address ? ` · ${session.ip_address}` : ""}</small><small className="settings-user-agent">{session.user_agent || "Device details unavailable"}</small></div><button className="danger" disabled={Boolean(revokingSession)} onClick={() => void revokeUserSession(session)}>{revokingSession === session.token ? "Logging out…" : "Log out device"}</button></div>) : <div className="admin-panel-empty"><b>No active devices</b></div>}</div>}
     </section></div>}
   </Root>;
 }

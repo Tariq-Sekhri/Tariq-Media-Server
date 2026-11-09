@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import AdminLoading from "./AdminLoading";
 import { useAppConfirm } from "../AppConfirmProvider";
 import { authFetch } from "../lib/auth";
 import { API_BASE, formatBytes } from "../lib/media";
@@ -60,7 +61,7 @@ export default function AdminTrash() {
       {entries && entries.length > 0 && <button type="button" className="admin-danger-action" disabled={Boolean(busy)} onClick={() => void empty()}>{busy === "empty" ? "Emptying…" : "Empty Trash"}</button>}
     </header>
     {message && <p className="admin-trash-message" role="status">{message}</p>}
-    {!entries ? <div className="admin-panel-empty"><span className="admin-loader">↻</span><b>Loading Trash</b></div>
+    {!entries ? <AdminLoading label="Loading Trash" />
       : !entries.length ? <div className="admin-panel-empty"><span>♲</span><b>Trash is empty</b></div>
         : <ul className="admin-trash-list">{entries.map((entry) => <li key={entry.id}>
           <span aria-hidden="true">{entry.kind === "folder" ? "▣" : "▤"}</span>
