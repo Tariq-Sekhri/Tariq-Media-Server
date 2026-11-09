@@ -26,7 +26,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower_http::{
     catch_panic::CatchPanicLayer,
     compression::CompressionLayer,
@@ -14139,12 +14139,32 @@ enum TrickplayVideoResult {
     Failed,
 }
 
+async fn preview_stderr_tail(mut stderr: impl tokio::io::AsyncRead + Unpin) -> String {
+    const LIMIT: usize = 8192;
+    let mut tail = Vec::new();
+    let mut buffer = [0u8; 4096];
+    loop {
+        match stderr.read(&mut buffer).await {
+            Ok(0) => break,
+            Ok(count) => {
+                tail.extend_from_slice(&buffer[..count]);
+                if tail.len() > LIMIT { tail.drain(..tail.len() - LIMIT); }
+            }
+            Err(error) => {
+                return format!("{} [stderr read failed: {error}]", String::from_utf8_lossy(&tail));
+            }
+        }
+    }
+    String::from_utf8_lossy(&tail).trim().to_owned()
+}
+
 async fn generate_trickplay_video(
     state: &AppState,
     library: &str,
     input: &Path,
 ) -> TrickplayVideoResult {
     if !state.ffmpeg_path.is_file() || !state.ffprobe_path.is_file() {
+        tracing::warn!(library, input = %input.display(), "Timeline-preview tools are missing");
         return TrickplayVideoResult::Failed;
     }
     let Ok(relative) = input.strip_prefix(&state.library_root) else {
@@ -14154,8 +14174,12 @@ async fn generate_trickplay_video(
     if !video_path.starts_with(&format!("{library}/")) {
         return TrickplayVideoResult::Failed;
     }
-    let Ok(metadata) = tokio::fs::metadata(input).await else {
-        return TrickplayVideoResult::Failed;
+    let metadata = match tokio::fs::metadata(input).await {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            tracing::warn!(library, video_path, %error, "Could not read timeline-preview source");
+            return TrickplayVideoResult::Failed;
+        }
     };
     let key = trickplay_key(&video_path, &metadata);
     let output_dir = state.trickplay_dir.join(key);
@@ -14175,18 +14199,23 @@ async fn generate_trickplay_video(
         .output()
         .await;
     let duration = probe
-        .ok()
+        .as_ref().ok()
         .filter(|result| result.status.success())
-        .and_then(|result| String::from_utf8(result.stdout).ok())
+        .and_then(|result| std::str::from_utf8(&result.stdout).ok())
         .and_then(|text| text.trim().parse::<f64>().ok())
         .filter(|value| value.is_finite() && *value > 0.0);
     let Some(duration) = duration else {
+        match probe {
+            Ok(output) => tracing::warn!(library, video_path, exit_code = ?output.status.code(), stderr = %String::from_utf8_lossy(&output.stderr), stdout = %String::from_utf8_lossy(&output.stdout), "Timeline-preview duration probe failed"),
+            Err(error) => tracing::warn!(library, video_path, %error, "Could not launch timeline-preview probe"),
+        }
         return TrickplayVideoResult::Failed;
     };
     if trickplay_is_complete(&output_dir, Some(duration)) {
         return TrickplayVideoResult::AlreadyGenerated;
     }
-    if tokio::fs::create_dir_all(&output_dir).await.is_err() {
+    if let Err(error) = tokio::fs::create_dir_all(&output_dir).await {
+        tracing::warn!(library, video_path, output = %output_dir.display(), %error, "Could not create timeline-preview output directory");
         return TrickplayVideoResult::Failed;
     }
     let pattern = output_dir.join("%08d.jpg");
@@ -14205,7 +14234,8 @@ async fn generate_trickplay_video(
         ])
         .arg(input)
         .args(["-vf", &format!("fps=1/{TRICKPLAY_INTERVAL_SECONDS},scale=960:-2:force_original_aspect_ratio=decrease"), "-q:v", "5", "-start_number", "0"])
-        .arg(pattern);
+        .arg(pattern)
+        .stderr(Stdio::piped());
     #[cfg(windows)]
     command.as_std_mut().creation_flags(
         0x0800_0000
@@ -14217,8 +14247,12 @@ async fn generate_trickplay_video(
     );
     let mut child = match command.spawn() {
         Ok(child) => child,
-        Err(_) => return TrickplayVideoResult::Failed,
+        Err(error) => {
+            tracing::warn!(library, video_path, %error, "Could not launch FFmpeg timeline-preview generation");
+            return TrickplayVideoResult::Failed;
+        }
     };
+    let stderr_reader = child.stderr.take().map(|stderr| tokio::spawn(preview_stderr_tail(stderr)));
     let pid = child.id();
     tracing::info!(library = %library, video_path = %video_path, pid = ?pid, max_speed, "Launched FFmpeg timeline-preview generation");
     {
@@ -14232,6 +14266,10 @@ async fn generate_trickplay_video(
         }
     }
     let status = child.wait().await;
+    let stderr = match stderr_reader {
+        Some(reader) => reader.await.unwrap_or_else(|error| format!("stderr reader failed: {error}")),
+        None => String::new(),
+    };
     {
         let mut active = state.active_trickplay_libraries.lock().await;
         if let Some(trickplay) = active.get_mut(library) {
@@ -14252,7 +14290,7 @@ async fn generate_trickplay_video(
             TrickplayVideoResult::Generated
         }
         None => {
-            tracing::debug!(video_path = %video_path, "Could not generate trickplay frames");
+            tracing::warn!(library, video_path, pid = ?pid, exit_code = ?status.as_ref().ok().and_then(|status| status.code()), wait_error = ?status.as_ref().err(), frames = frames.0, expected_frames = trickplay_expected_frames(duration), %stderr, "FFmpeg timeline-preview generation failed");
             TrickplayVideoResult::Failed
         }
     }
@@ -19517,6 +19555,20 @@ mod tests {
         assert_ne!(key, changed_key);
         assert!(!browser_media_is_complete(&root, &changed_key));
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn timeline_preview_stderr_is_drained_and_keeps_bounded_failure_tail() {
+        let (mut writer, reader) = tokio::io::duplex(128);
+        let writing = tokio::spawn(async move {
+            writer.write_all(&vec![b'x'; 20000]).await.unwrap();
+            writer.write_all(b"final FFmpeg failure").await.unwrap();
+        });
+        let tail = preview_stderr_tail(reader).await;
+        writing.await.unwrap();
+        assert_eq!(tail.len(), 8192);
+        assert!(tail.ends_with("final FFmpeg failure"));
+        assert_eq!(preview_stderr_tail(&b""[..]).await, "");
     }
 
     #[cfg(windows)]
