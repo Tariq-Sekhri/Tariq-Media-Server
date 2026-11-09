@@ -1719,7 +1719,6 @@ export default function AdminDashboard({ embedded = false }: { embedded?: boolea
                   </a>
                 </h2>
                 <code>{location.path}</code>
-                <span>Attached without moving the source folder.</span>
               </div>
               <div className="admin-location-actions">
                 <button type="button" className="admin-location-remove" disabled={detachingLocation === `${location.parent_library ?? "library"}:${location.folder_path ?? location.name}`} onClick={() => void detachLibraryLocation(location)}>{detachingLocation === `${location.parent_library ?? "library"}:${location.folder_path ?? location.name}` ? "Removing…" : "Remove"}</button>
