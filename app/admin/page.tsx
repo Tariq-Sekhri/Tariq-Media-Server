@@ -162,10 +162,10 @@ const formatBytes = (bytes: number | null | undefined) => {
   return `${(bytes / 1024 ** unit).toFixed(unit >= 3 ? 1 : 0)} ${units[unit]}`;
 };
 function UserStorage({ user }: { user: AdminUser }) {
-  const summary = `${formatBytes(user.used_bytes)} used${user.reserved_bytes > 0 ? `, ${formatBytes(user.reserved_bytes)} reserved` : ""}, ${user.storage_quota_bytes === null ? "unlimited" : `${formatBytes(user.storage_quota_bytes)} limit`}`;
+  const summary = `${formatBytes(user.used_bytes)} used, ${user.storage_quota_bytes === null ? "unlimited" : `${formatBytes(user.storage_quota_bytes)} limit`}`;
   return <div className="admin-user-storage" title={summary}>
-    <small>{formatBytes(user.used_bytes)} used &middot; {formatBytes(user.storage_quota_bytes)}{user.reserved_bytes > 0 && <> &middot; {formatBytes(user.reserved_bytes)} reserved</>}</small>
-    {user.storage_quota_bytes !== null && <progress aria-label={`${user.name} server storage`} aria-valuetext={summary} max={Math.max(1, user.storage_quota_bytes)} value={user.used_bytes + user.reserved_bytes} />}
+    <small>{formatBytes(user.used_bytes)} used &middot; {formatBytes(user.storage_quota_bytes)}</small>
+    {user.storage_quota_bytes !== null && <progress aria-label={`${user.name} server storage`} aria-valuetext={summary} max={Math.max(1, user.storage_quota_bytes)} value={user.used_bytes} />}
   </div>;
 }
 
