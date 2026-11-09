@@ -2058,6 +2058,15 @@ fn hand_back_to_admin(r: &mut Request, note: String) {
     r.auto_pick_note = Some(note);
 }
 
+// Stop before downloading until an administrator approves the pick.
+fn await_approval(r: &mut Request, proposal: String) -> bool {
+    if r.approved_by.is_some() { return false; }
+    tracing::info!(request_id=%r.id, title=%r.title, season=?r.season, proposal=%proposal, "Discover auto pick proposal awaiting approval");
+    r.status = "pending".into();
+    r.proposal = Some(proposal);
+    true
+}
+
 async fn try_automatic_download(state: &AppState, s: &Service, r: &mut Request, files: &[(String, u64)]) -> Result<(), (StatusCode, Json<Value>)> {
     let today = time::OffsetDateTime::now_utc().date().to_string();
     // Before a digital release the only torrents are camera copies and fakes.
@@ -2111,6 +2120,8 @@ async fn try_automatic_download(state: &AppState, s: &Service, r: &mut Request, 
         tracing::info!(request_id=%r.id, option=i+1, title=?release["title"].as_str(),
             reason=%format!("highest-ranked eligible option ({}); ranking: {RANKING_RULE}", release_rank_reason(r, release)),
             "Discover auto pick winner");
+        let proposal = format!("{} ({})", release["title"].as_str().unwrap_or("Untitled release"), release_rank_reason(r, release));
+        if await_approval(r, proposal) { return Ok(()); }
         let guid = release["guid"].as_str().unwrap().to_owned();
         let indexer = release["indexerId"].as_u64().unwrap();
         let seasons = automatic_release_seasons(r, release);
@@ -2145,6 +2156,7 @@ async fn try_automatic_download(state: &AppState, s: &Service, r: &mut Request, 
             hand_back_to_admin(r, format!("No episodes of Season {season} have aired yet and no subscription is following this show."));
             return Ok(());
         }
+        if await_approval(r, format!("Nothing to download yet. Approving follows Season {season} for new episodes.")) { return Ok(()); }
         tracing::info!(request_id=%r.id, season, "Discover auto pick has nothing aired to download; the subscription follows new episodes");
         requests::finish_download_handoff(state, r, &BTreeSet::new()).await?;
         return Ok(());
@@ -2166,6 +2178,10 @@ async fn try_automatic_download(state: &AppState, s: &Service, r: &mut Request, 
         hand_back_to_admin(r, format!("Auto pick found no complete Season {season} release or episode release{audio} with at least {MIN_SEEDERS} seeders within the 50 GiB budget. Choose a torrent below."));
         return Ok(());
     }
+    let proposal = plan.picks.iter()
+        .map(|(i, episodes)| format!("Episode(s) {}: {} ({})", join_numbers(episodes), rows[*i]["title"].as_str().unwrap_or("Untitled release"), release_rank_reason(r, &rows[*i])))
+        .collect::<Vec<_>>().join("; ");
+    if await_approval(r, proposal) { return Ok(()); }
     let mut queued = BTreeSet::new();
     let mut failures = vec![];
     for (i, episodes) in &plan.picks {
@@ -3087,6 +3103,12 @@ pub async fn tick(state: &AppState) -> Result<(), (StatusCode, Json<Value>)> {
         if clear_preselection_quota_failure(&mut r) {
             release_request_reservation(state, &r).await?;
         }
+        // Awaiting approval means a proposed pick exists. Older pending rows
+        // without one search and auto pick first.
+        if r.status == "pending" && r.proposal.is_none() && r.approved_by.is_none() {
+            r.status = "queued".into();
+            r.auto_download = true;
+        }
         tracing::info!(request_id=%r.id, title=%r.title, status=%r.status, "Discover tick processing request");
         if can_search_releases(&r) {
             if let Err((_, Json(value))) = prepare_release_search(state, &mut r).await {
@@ -3215,6 +3237,17 @@ mod tests {
         assert!(super::automatic_rejection(&request, &release, false).is_some_and(|reason| reason.contains("not finished airing")));
     }
 
+    #[test]
+    fn unapproved_requests_stop_at_the_proposed_pick() {
+        let mut request: super::Request = serde_json::from_value(json!({"id":"approval-test","kind":"movie","tmdb_id":10,"title":"Example","season":null,"expected_episodes":[],"monitor_future":false,"library":"Movies","owner_id":2,"subscribers":[2],"status":"queued","error":null,"created_at":1,"updated_at":1,"hash":null,"service_id":null,"progress":0,"auto_download":true})).unwrap();
+        assert!(super::await_approval(&mut request, "Example.1080p".into()));
+        assert_eq!(request.status, "pending");
+        assert_eq!(request.proposal.as_deref(), Some("Example.1080p"));
+        request.approved_by = Some(1);
+        request.status = "queued".into();
+        assert!(!super::await_approval(&mut request, "Example.1080p".into()));
+        assert_eq!(request.status, "queued");
+    }
     #[test]
     fn foreign_titles_auto_pick_only_english_audio_releases() {
         let request: super::Request = serde_json::from_value(json!({"id":"auto-test","kind":"tv","tmdb_id":10,"title":"Example","season":1,"expected_episodes":[1,2],"monitor_future":false,"library":"TV","owner_id":1,"subscribers":[1],"status":"queued","error":null,"created_at":1,"updated_at":1,"hash":null,"service_id":null,"progress":0,"auto_download_seasons":[1]})).unwrap();

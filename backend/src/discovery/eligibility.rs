@@ -21,7 +21,13 @@ fn aired(date: &Value, today: &str) -> bool {
     valid && date <= today
 }
 
+// A movie is out of theaters once it has a past digital, physical or TV
+// release. TMDB often lists none for older films, so a theatrical release
+// from more than a year ago also counts.
 pub(super) fn digital_movie(releases: &Value, today: &str) -> bool {
+    let year_ago = today.get(..4).and_then(|y| y.parse::<i32>().ok())
+        .zip(today.get(4..))
+        .map(|(year, rest)| format!("{:04}{}", year - 1, rest).replace("-02-29", "-02-28"));
     releases["results"]
         .as_array()
         .into_iter()
@@ -31,7 +37,11 @@ pub(super) fn digital_movie(releases: &Value, today: &str) -> bool {
                 .as_array()
                 .into_iter()
                 .flatten()
-                .any(|release| release["type"] == 4 && aired(&release["release_date"], today))
+                .any(|release| match release["type"].as_u64() {
+                    Some(4..=6) => aired(&release["release_date"], today),
+                    Some(1..=3) => year_ago.as_deref().is_some_and(|cutoff| aired(&release["release_date"], cutoff)),
+                    _ => false,
+                })
         })
 }
 
@@ -68,7 +78,10 @@ mod tests {
     #[test]
     fn movies_need_an_actual_past_digital_date() {
         for (kind, date, expected) in [
-            (3, "2020-01-01", false),
+            (3, "2025-10-12", false),
+            (3, "2025-10-11", true),
+            (3, "1973-10-18", true),
+            (6, "2026-10-11", true),
             (4, "2026-10-11", true),
             (4, "2026-10-12", false),
             (4, "", false),

@@ -336,6 +336,7 @@ async fn check(
             monitor_from: Some(from),
             monitor_applied_at: 0,
             auto_pick_note: None,
+            proposal: None,
         });
         *changed = true;
     }

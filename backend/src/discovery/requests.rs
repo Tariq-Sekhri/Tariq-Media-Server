@@ -64,6 +64,9 @@ pub struct Request {
     // Why auto pick stopped short and left the request for an administrator.
     #[serde(default)]
     pub auto_pick_note: Option<String>,
+    // The release auto pick chose for a request still awaiting approval.
+    #[serde(default)]
+    pub proposal: Option<String>,
 }
 #[derive(Default, Deserialize, Serialize)]
 pub struct Queue {
@@ -354,11 +357,11 @@ async fn create(
         let id = uuid::Uuid::new_v4().to_string();
         let reserved = eligible && reserve_storage(&mut ledger, &user,
             &format!("discover:{id}"), "discover", arr::REQUEST_BUDGET_BYTES);
-        // Every approved request is auto picked; the reservation only lets
-        // completed titles skip administrator approval.
+        // Every request searches and auto picks first. The reservation only
+        // lets released titles skip administrator approval of that pick.
         let approved = reserved || permission.auto_approve_requests;
-        let auto_download = approved;
-        automatic += usize::from(auto_download);
+        let auto_download = true;
+        automatic += usize::from(approved);
         follow |= approved && input.kind == "tv";
         ids.push(id.clone());
         new_count += 1;
@@ -375,12 +378,7 @@ async fn create(
             download_user_id: None,
             quota_override_by: None,
             subscribers: BTreeSet::from([user.id]),
-            status: if approved {
-                "queued"
-            } else {
-                "pending"
-            }
-            .into(),
+            status: "queued".into(),
             error: None,
             created_at: unix_now(),
             updated_at: unix_now(),
@@ -402,6 +400,7 @@ async fn create(
             monitor_from: None,
             monitor_applied_at: 0,
             auto_pick_note: None,
+            proposal: None,
         });
     }
     write_storage_ledger(&state.storage_path, &ledger).await.map_err(internal)?;
@@ -476,7 +475,10 @@ async fn action(
                 }
                 .into();
                 r.approved_by = Some(caller.id);
+                r.proposal = None;
                 if input.action == "approve" {
+                    // The next tick re-runs auto pick over the same saved
+                    // results and downloads the proposed release.
                     r.auto_download = true;
                     r.auto_pick_note = None;
                     if r.kind == "tv" {
