@@ -6651,7 +6651,7 @@ export default function Home() {
                 >
                   <b>PLAYLISTS</b>
                 </button>
-                <details className="collection-sort-menu"><summary aria-label="Sort playlists">Sort</summary><select
+                <label className="collection-sort-control"><span aria-hidden="true">Sort</span><select
                   className="sidebar-collection-inline-sort"
                   aria-label="Sort sidebar playlists by"
                   value={playlistSidebarSort}
@@ -6660,7 +6660,7 @@ export default function Home() {
                   <option value="count">Most items</option>
                   <option value="opened">Last opened</option>
                   <option value="name">Name</option>
-                </select></details>
+                </select></label>
                 <button
                   type="button"
                   className="sidebar-collection-create"
@@ -6738,7 +6738,7 @@ export default function Home() {
                 >
                   <b>TAGS</b>
                 </button>
-                <details className="collection-sort-menu"><summary aria-label="Sort tags">Sort</summary><select
+                <label className="collection-sort-control"><span aria-hidden="true">Sort</span><select
                   className="sidebar-collection-inline-sort"
                   aria-label="Sort sidebar tags by"
                   value={tagSidebarSort}
@@ -6747,7 +6747,7 @@ export default function Home() {
                   <option value="count">Most items</option>
                   <option value="opened">Last opened</option>
                   <option value="name">Name</option>
-                </select></details>
+                </select></label>
                 <button
                   type="button"
                   className="sidebar-collection-create"
