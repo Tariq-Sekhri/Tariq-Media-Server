@@ -7214,8 +7214,9 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 .lib-opt-avatar { display: inline-grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #241f3d; color: #cfc6ff; font-size: 11px; font-weight: 850; }
 .lib-opt-admin { color: #8fd8a9; font-size: 12px; font-weight: 800; }
 .lib-opt-access { margin: 0; padding: 0; list-style: none; }
-.lib-opt-access li { display: grid; grid-template-columns: 28px minmax(90px, 180px) auto minmax(0, 1fr); align-items: center; gap: 8px 12px; padding: 9px 0; border-top: 1px solid #252b31; }
-.lib-opt-access li > b { overflow: hidden; color: #e1e6e9; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.lib-opt-access li { min-width: 0; padding: 9px 0; border-top: 1px solid #252b31; }
+.lib-opt-access-controls { display: grid; grid-template-columns: 28px minmax(90px, 180px) auto minmax(0, 1fr); align-items: center; gap: 8px 12px; min-width: 0; }
+.lib-opt-access-controls > b { overflow: hidden; color: #e1e6e9; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .lib-opt-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .lib-opt-chips button { border: 1px solid #30373e; border-radius: 999px; padding: 4px 10px; background: transparent; color: #7f8a92; font-size: 12px; font-weight: 700; cursor: pointer; }
 .lib-opt-chips button.on { border-color: #5a4bb8; background: #221d40; color: #ddd6ff; }
@@ -7241,8 +7242,8 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 .lib-opt-seg button.on { background: #251f47; color: #e4dfff; }
 .lib-opt-seg button.on.is-none { background: #1b1e22; color: #9ba0a3; }
 .lib-opt-link { justify-self: start; border: 0; padding: 4px 0; background: none; color: #a99bff; font-size: 12px; font-weight: 750; cursor: pointer; }
-.lib-opt-access.is-buttons li { grid-template-columns: 28px minmax(80px, 160px) auto auto; justify-content: start; }
-.lib-opt-access.is-buttons li > .lib-opt-chips { grid-column: 2 / -1; }
+.lib-opt-access.is-buttons .lib-opt-access-controls { grid-template-columns: 28px minmax(80px, 160px) auto auto; justify-content: start; }
+.lib-opt-access li > .lib-opt-chips { min-width: 0; margin: 8px 0 0 40px; }
 .lib-opt-columns { display: grid; flex: 1; grid-template-columns: minmax(200px, 240px) minmax(0, 1fr); gap: 24px; align-items: stretch; }
 .lib-opt-columns h3 { margin: 0 0 8px; }
 .lib-opt-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; border-right: 1px solid #343b43; padding-right: 20px; }
@@ -7253,8 +7254,8 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
   .lib-opt-index::after { display: none; }
   .lib-opt-index button { flex: none; }
   .lib-opt-stack { border-right: 0; padding-right: 0; }
-  .lib-opt-access li,.lib-opt-access.is-buttons li { grid-template-columns: 28px minmax(0, 1fr) auto; }
-  .lib-opt-access li > .lib-opt-chips,.lib-opt-access.is-buttons li > .lib-opt-seg { grid-column: 2 / -1; }
+  .lib-opt-access-controls,.lib-opt-access.is-buttons .lib-opt-access-controls { grid-template-columns: 28px minmax(0, 1fr) auto; }
+  .lib-opt-access.is-buttons .lib-opt-access-controls > .lib-opt-seg { grid-column: 2 / -1; }
 }
 
 /* Requests: two plain columns on the page background. */

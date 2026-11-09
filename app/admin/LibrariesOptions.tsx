@@ -100,7 +100,7 @@ function PresetButtons({ ctx, path, name }: { ctx: Ctx; path: string; name: stri
 
 const Avatar = ({ name }: { name: string }) => <span className="lib-opt-avatar" aria-hidden="true">{name.slice(0, 2).toUpperCase()}</span>;
 
-/* Settings and access side by side; permissions behind Customize. */
+/* Settings and access side by side; permissions behind Custom. */
 function SideBySide(ctx: Ctx) {
   const [path, select] = useSelectedLibrary(ctx);
   const [custom, setCustom] = useState<string | null>(null);
@@ -122,10 +122,12 @@ function SideBySide(ctx: Ctx) {
             const enabled = !ctx.isAdmin(name) && Boolean(ctx.memberOf(path, name)?.can_view);
             const key = `${path}\n${name}`;
             return <li key={name}>
-              <Avatar name={name} />
-              <b>{name}</b>
-              <PresetButtons ctx={ctx} path={path} name={name} />
-              {enabled ? <button type="button" className="lib-opt-link" aria-expanded={custom === key} onClick={() => setCustom(custom === key ? null : key)}>Customize</button> : <span />}
+              <div className="lib-opt-access-controls">
+                <Avatar name={name} />
+                <b>{name}</b>
+                <PresetButtons ctx={ctx} path={path} name={name} />
+                {enabled ? <button type="button" className="lib-opt-link" aria-expanded={custom === key} onClick={() => setCustom(custom === key ? null : key)}>Custom</button> : <span />}
+              </div>
               {custom === key && enabled && <PermissionChips ctx={ctx} path={path} name={name} />}
             </li>;
           })}</ul>
