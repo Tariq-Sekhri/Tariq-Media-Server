@@ -236,10 +236,6 @@ const libraryFingerprint = (library: LibraryConfig) => JSON.stringify({ content_
 const formatCreatedDate = (timestamp: number) => timestamp
   ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(timestamp * 1000))
   : "Unknown";
-const formatLogTime = (timestamp: string) => {
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? timestamp : new Intl.DateTimeFormat(undefined, { month: "numeric", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }).format(date);
-};
 const logValue = (line: string, key: string) => line.match(new RegExp(`(?:^|\\s)${key}=([^\\s]+)`))?.[1];
 
 export default function AdminDashboard() {
@@ -1302,7 +1298,6 @@ export default function AdminDashboard() {
               const imageTimes: number[] = [];
               const totalTimes: number[] = [];
               const mediaActions: { phase: string; durationMs: number; outcome: "success" | "error" }[] = [];
-              const completedLoads: { time: number; folder: string; cacheState: string; cacheMs: number | null; serverConnected: boolean; serverMs: number | null; imageMs: number; totalMs: number; timedOut: boolean }[] = [];
               const timeSeriesData: { time: number; cache?: number; server?: number; video?: number; image?: number; total?: number }[] = [];
 
               const deviceClasses = [...new Set(metricsLogs.lines.map((line) => performanceDetails(line)?.device_class).filter((value): value is string => typeof value === "string"))].sort();
@@ -1331,19 +1326,6 @@ export default function AdminDashboard() {
                       if (cacheVal !== undefined) { sumCacheTime += cacheVal; cacheTimes.push(cacheVal); }
                       if (imageVal !== undefined) imageTimes.push(imageVal);
                       if (totalVal !== undefined) totalTimes.push(totalVal);
-                      if (imageVal !== undefined && totalVal !== undefined) {
-                        completedLoads.push({
-                          time,
-                          folder: typeof details.folder === "string" ? details.folder : "root",
-                          cacheState: typeof details.cache_state === "string" ? details.cache_state : details.cache_hit ? "hit" : "miss",
-                          cacheMs: cacheVal ?? null,
-                          serverConnected: details.server_connected !== false,
-                          serverMs: serverVal ?? null,
-                          imageMs: imageVal,
-                          totalMs: totalVal,
-                          timedOut: details.timed_out === true,
-                        });
-                      }
                       if (time > 0) {
                         timeSeriesData.push({ time, cache: cacheVal, server: serverVal, image: imageVal, total: totalVal });
                       }
@@ -1477,22 +1459,6 @@ export default function AdminDashboard() {
                       <select value={metricDeviceFilter} onChange={(event) => setMetricDeviceFilter(event.target.value)}><option value="all">All devices</option>{deviceClasses.map((device) => <option value={device} key={device}>{device[0].toUpperCase() + device.slice(1)}</option>)}</select>
                     </label>
                   </div>
-                  {completedLoads.length > 0 && (
-                    <div style={{ margin: "1.25rem 1.5rem 0", padding: "1rem", border: "1px solid var(--border)", borderRadius: "8px", background: "var(--surface-sunken)" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", marginBottom: "0.7rem" }}>
-                        <div><b>Latest completed library loads</b><div style={{ fontSize: "0.8rem", color: "var(--muted)", marginTop: "0.2rem" }}>The same cache, server, image, and total timing shown in the library header.</div></div>
-                        <span style={{ fontSize: "0.8rem", color: "var(--muted)", whiteSpace: "nowrap" }}>{completedLoads.length.toLocaleString()} recorded</span>
-                      </div>
-                      <div style={{ display: "grid", gap: "0.4rem" }}>
-                        {completedLoads.sort((a, b) => b.time - a.time).slice(0, 6).map((load, index) => (
-                          <div key={`${load.time}-${index}`} style={{ display: "flex", gap: "0.75rem", alignItems: "baseline", fontSize: "0.8rem" }}>
-                            <time style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>{load.time > 0 ? formatLogTime(new Date(load.time).toISOString()) : "Unknown time"}</time>
-                            <code style={{ overflowWrap: "anywhere" }}>[DEBUG: {load.folder === "root" ? "Root" : load.folder}] Cache: {load.cacheState.toUpperCase()} {load.cacheMs === null ? "" : `(${load.cacheMs.toFixed(1)}ms)`} | Server: {load.serverConnected ? "CONNECTED" : "DISCONNECTED"} {load.serverMs === null ? "" : `(${load.serverMs.toFixed(1)}ms)`} | Image Load: {load.imageMs.toFixed(1)}ms | Total: {load.totalMs.toFixed(1)}ms{load.timedOut ? " (image timeout)" : ""}</code>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                   {actionSummaries.length > 0 && (
                     <div style={{ margin: "1.25rem 1.5rem 0", padding: "1rem", border: "1px solid var(--border)", borderRadius: "8px", background: "var(--surface-sunken)" }}>
                       <div style={{ marginBottom: "0.8rem" }}><b>Media transactions</b><div style={{ fontSize: "0.8rem", color: "var(--muted)", marginTop: "0.2rem" }}>End-to-end browser timings and failure rates from client performance events.</div></div>
