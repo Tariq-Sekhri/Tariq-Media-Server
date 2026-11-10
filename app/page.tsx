@@ -31,6 +31,7 @@ import ServerDownloadDialog, { type YtDlpJob } from "./ServerDownloadDialog";
 import TagInput from "./TagInput";
 import { usePlaybackSession } from "./PlaybackProvider";
 import { navigateApp, syncAppShell, useAppShell } from "./lib/app-shell";
+import { beginPlaybackTrace, playbackTracePhase, writePlaybackTrace, type PlaybackTrace } from "./lib/playback-trace";
 import AdminDashboard from "./admin/page";
 import { startPlaybackSession, playbackSessionSnapshot, setPlaybackSession } from "./lib/playback-session";
 import { hydrateNativeWatchProgress } from "./lib/native-watch-progress";
@@ -304,13 +305,6 @@ const formatJobStoppedTime = (timestamp?: number) => {
   return isToday
     ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
     : date.toLocaleDateString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-};
-const trailerYoutubeId = (metadata?: TitleMetadata) => {
-  const source = metadata?.trailers?.find((trailer) => trailer.type?.toLowerCase().includes("trailer"))?.source
-    ?? metadata?.trailers?.[0]?.source;
-  if (!source) return null;
-  const match = source.match(/(?:v=|youtu\.be\/|youtube:|yt:)?([A-Za-z0-9_-]{11})$/);
-  return match?.[1] ?? null;
 };
 const formatUploadSize = (bytes: number) => bytes <= 0
   ? "0 B"
@@ -1509,7 +1503,6 @@ export default function Home() {
   const [libraries, setLibraries] = useState<Record<string, LibraryConfig>>(() => initialSnapshot?.libraries ?? {});
   const [folderCovers, setFolderCovers] = useState<Record<string, string>>(() => initialSnapshot?.folderCovers ?? {});
   const [titleMetadata, setTitleMetadata] = useState<Record<string, TitleMetadata>>(() => initialSnapshot?.titleMetadata ?? {});
-  const [trailer, setTrailer] = useState<{ title: string; youtubeId: string } | null>(null);
   const uploadInput = useRef<HTMLInputElement>(null);
   const uploadFolderInput = useRef<HTMLInputElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
@@ -1521,7 +1514,6 @@ export default function Home() {
   const adminRoute = new URL(shellPath || "/", "http://tms.local").pathname === "/admin";
   const metadataLoading = useRef(new Set<string>());
   const [pendingTitleMetadata, setPendingTitleMetadata] = useState<Set<string>>(() => new Set());
-  const trailerMetadataRefresh = useRef(new Set<string>());
   const automaticFolderCoverRequests = useRef(new Set<string>());
   const libraryCache = useRef<LibraryCache | null>(null);
   const uploadQueueRef = useRef<UploadQueueItem[]>([]);
@@ -3319,11 +3311,8 @@ export default function Home() {
     metadataTargets.forEach(({ path, title: rawTitle, evidence }) => {
       const metadataKey = titleMetadataKey(path, evidence.kind);
       const cachedMetadata = titleMetadata[metadataKey];
-      const hasCachedTrailer = Boolean(trailerYoutubeId(cachedMetadata));
-      const needsTrailerRefresh = Boolean(cachedMetadata && !hasCachedTrailer && !trailerMetadataRefresh.current.has(metadataKey));
       const hasCompleteCachedMetadata = Boolean(cachedMetadata && (evidence.kind !== "series" || cachedMetadata.videos?.length));
-      if ((hasCompleteCachedMetadata && !needsTrailerRefresh) || metadataLoading.current.has(metadataKey)) return;
-      if (needsTrailerRefresh) trailerMetadataRefresh.current.add(metadataKey);
+      if (hasCompleteCachedMetadata || metadataLoading.current.has(metadataKey)) return;
       metadataLoading.current.add(metadataKey);
       setPendingTitleMetadata(new Set(metadataLoading.current));
       const queries = catalogTitleQueries(rawTitle);
@@ -3588,8 +3577,10 @@ export default function Home() {
     queueLabel?: string,
     folderQueue?: { folder: string; sort: SortField; direction: SortDirection; shuffle?: boolean; shuffleSeed?: string },
     queueSource?: QueueSource,
+    trace?: PlaybackTrace,
   ) => {
     if (!item.src) return;
+    trace ??= beginPlaybackTrace({ trigger: "media_play", media_name: item.name });
 
     const libraryType = libraries[(item.parent ?? "").split("/")[0]]?.content_type;
     const source = queueSource ? queueSourceForItem(queueSource, item) : undefined;
@@ -3611,6 +3602,7 @@ export default function Home() {
     const saved = readPlayback(item);
     const resumeAt = !savesWatchProgress(item.path) ? 0 : startAt ?? (saved && !saved.completed ? saved.position : 0);
     const params = new URLSearchParams({ src: item.src, name: item.name, size: item.size, folder: item.parent ?? "My library", kind: item.kind });
+    writePlaybackTrace(params, trace);
     params.set("playbackSession", startedSession.id);
     if (item.path) params.set("path", item.path);
     if (item.offline?.bundleId && item.offline.fileId) {
@@ -3679,6 +3671,7 @@ export default function Home() {
     const browseSnapshot = playbackBrowseSnapshot();
     // Avoid vinext's client router: it can fail while initializing Web Crypto
     // on plain-HTTP LAN installs. The app shell opens Watch in this document.
+    playbackTracePhase("play_navigation_started", {}, trace);
     navigateApp(`/watch?${params.toString()}`);
     // Serializing a full library snapshot and updating thousands of items can
     // take long enough to make a video click feel stuck. Start navigation
@@ -3707,14 +3700,15 @@ export default function Home() {
 
   const playVisibleQueue = (shuffle: boolean) => {
     if (!playableVisible.length) return flash("No playable media in this view");
+    const trace = beginPlaybackTrace({ trigger: shuffle ? "shuffle" : "play_all" });
     if (section === "offline") {
       const queue = shuffle ? shuffleMedia(playableVisible) : [...playableVisible];
-      playVideo(queue[0], undefined, queue, shuffle ? "Shuffled" : "Play all", undefined);
+      playVideo(queue[0], undefined, queue, shuffle ? "Shuffled" : "Play all", undefined, undefined, trace);
       return;
     }
     const source = currentQueueSource(shuffle ? "shuffle" : "all");
     const navigate = (item: MediaItem, source: QueueSource) => {
-      playVideo(item, undefined, undefined, undefined, undefined, source);
+      playVideo(item, undefined, undefined, undefined, undefined, source, trace);
     };
     if (shuffle && isServerPagedFolder && serverHasMore && serverTotal > 0) {
       void startPagedShuffle(serverTotal, source, async (offset) => {
@@ -3817,13 +3811,16 @@ export default function Home() {
   };
 
   const playCatalogTitle = (path: string, kind: "movie" | "series") => {
+    const trace = beginPlaybackTrace({ trigger: "catalog_play", catalog_kind: kind });
     // Route first. The watch page resolves the current feature/episode after
     // it has painted, so Play never waits on a recursive catalog walk here.
     const params = new URLSearchParams({ catalogPath: path, catalogKind: kind, catalog: "movies_tv", play: "1", return: `${window.location.pathname}${window.location.search}` });
+    writePlaybackTrace(params, trace);
     const metadata = titleMetadata[titleMetadataKey(path, kind)];
     if (metadata?.id?.startsWith("tt")) params.set("imdb", metadata.id);
     // Avoid vinext's client router: it relies on Web Crypto, which is
     // unavailable on the app's plain-HTTP LAN address.
+    playbackTracePhase("play_navigation_started", {}, trace);
     navigateApp(`/watch?${params.toString()}`);
   };
 
@@ -7438,7 +7435,6 @@ export default function Home() {
                     isTitle && evidence
                       ? titleMetadata[titleMetadataKey(titleCardPath, evidence.kind)]
                       : undefined;
-                  const youtubeTrailerId = trailerYoutubeId(metadata);
                   const metadataPending = Boolean(isTitle && evidence && !metadata && pendingTitleMetadata.has(titleMetadataKey(titleCardPath, evidence.kind)));
                   const titleCollection = itemPath
                     ? titleCollectionForPath(itemPath)
@@ -7820,17 +7816,19 @@ export default function Home() {
                             <span aria-hidden="true">▶</span>
                           </button>
                         )}
-                        {youtubeTrailerId && (
+                        {isTitle && (
                           <button
-                            className="catalog-trailer"
-                            aria-label={`Watch ${displayName} trailer`}
+                            type="button"
+                            className="catalog-cover-menu"
+                            aria-label={`More actions for ${displayName}`}
+                            aria-expanded={contextItem?.item.id === item.id}
                             onClick={(event) => {
                               event.preventDefault();
                               event.stopPropagation();
-                              setTrailer({ title: displayName, youtubeId: youtubeTrailerId });
+                              toggleItemContextMenu(event, item);
                             }}
                           >
-                            Trailer
+                            •••
                           </button>
                         )}
                         {!isLibrary && canSelectItem(item) && (
@@ -7882,15 +7880,25 @@ export default function Home() {
                         )}
                         </div>
                       </a>
+                      {isTitle && metadata?.id.startsWith("tt") && (
+                        <a
+                          className="imdb-link catalog-cover-imdb"
+                          href={`https://www.imdb.com/title/${metadata.id}/`}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`View ${displayName} on IMDb`}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          IMDb ↗
+                        </a>
+                      )}
                       <div className="card-details">
                         <div>
                           <a className="card-label-link" href={getItemUrl()} onClick={openCard} aria-label={[displayName, cardPlaybackLabel].filter(Boolean).join(", ")}>
                           <strong className={displayName.length > 110 ? "media-title-very-long" : displayName.length > 70 ? "media-title-long" : undefined} title={displayName}>{mediaTitleContent(displayName)}</strong>{activeSearch.trim() && item.kind === "folder" && <span>{folderItemCount} {evidence?.kind === "series" ? "season" : "item"}{folderItemCount === 1 ? "" : "s"}{item.favorite ? " · ★ Favorite" : ""}{displayTags.length ? ` · ${displayTags.join(" · ")}` : ""}</span>}
                           {metadataPending ? (
                             <span className="catalog-details-loading">Loading details…</span>
-                          ) : metadata ? (
-                            <span>{[metadata.type === "movie" ? "Movie" : "Series"].filter(Boolean).join(" · ")}</span>
-                          ) : (
+                          ) : !metadata ? (
                             <span>
                               {(isLibrary
                                 ? `${libraryTypeLabel(libraries[item.name]?.content_type ?? "mixed")} · ${folderItemCount} item${folderItemCount === 1 ? "" : "s"}`
@@ -7900,7 +7908,7 @@ export default function Home() {
                                     ? `${titleKindLabel ?? "Folder"} · ${folderItemCount} item${folderItemCount === 1 ? "" : "s"}`
                                     : [item.kind === "video" ? "" : item.kind === "audio" ? "Audio" : item.kind === "image" ? "Image" : "File", formatListDuration(item.duration), item.kind === "video" || item.kind === "audio" ? "" : item.size].filter(Boolean).join(" · ")).replace(/(\d) (?=[A-Za-z])/g, "$1\u00a0")}
                             </span>
-                          )}
+                          ) : null}
                           </a>
                         </div>
                         <div className={metadata?.id.startsWith("tt") ? "catalog-card-actions" : "card-actions"}>
@@ -7928,20 +7936,6 @@ export default function Home() {
                               }}
                             >
                               <svg width="12" height="12" viewBox="0 0 12 12" style={{ width: 12, height: 12, flex: "0 0 12px" }} aria-hidden="true"><path d="M2 1l9 5-9 5z" fill="currentColor" /></svg>Play
-                            </button>
-                          )}
-                          {youtubeTrailerId && (
-                            <button
-                              type="button"
-                              className="card-inline-action"
-                              aria-label={`Watch ${displayName} trailer`}
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                setTrailer({ title: displayName, youtubeId: youtubeTrailerId });
-                              }}
-                            >
-                              Trailer
                             </button>
                           )}
                           <button
@@ -9893,21 +9887,6 @@ export default function Home() {
         </div>
       )}
 
-      {trailer && (
-        <div className="preview-backdrop" onClick={() => setTrailer(null)}>
-          <div className="trailer-modal" onClick={(event) => event.stopPropagation()}>
-            <button className="trailer-close" aria-label="Close trailer" onClick={() => setTrailer(null)}>×</button>
-            <iframe
-              src={`https://www.youtube-nocookie.com/embed/${trailer.youtubeId}?autoplay=1&rel=0`}
-              title={`${trailer.title} trailer`}
-              allow="autoplay; encrypted-media; picture-in-picture"
-              allowFullScreen
-            />
-            <h2>{trailer.title}</h2>
-            <p>Trailer from YouTube</p>
-          </div>
-        </div>
-      )}
 
 
     </main>

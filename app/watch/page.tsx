@@ -8,6 +8,8 @@ import Hls from "hls.js";
 import { cachedFragmentLoader, canDirectPlayVideo, preferredAudioTrack, preloadSegments, type VideoInfo } from "../lib/episode-preload";
 import { canBufferQueueVideo, nearbyQueueItems, QUEUE_PRELOAD_BYTES } from "../lib/queue-preload";
 import { authFetch, getSessionUser, reportClientError, reportClientPerformance } from "../lib/auth";
+import { beginPlaybackTrace, playbackTracePhase, traceFromParams, writePlaybackTrace } from "../lib/playback-trace";
+import { commonFolder, librarySubtreeUrl, playbackUserStateUrl, queueFetchScopes, sharedJson } from "../lib/watch-requests";
 import { API_BASE, apiEntryToMediaItem, episodeNumbers, isMovieWatch, isShowWatch, readStoredVolumePosition, resolveEpisodeMetadata, applyMediaVolume, readMediaVolumePosition, resumeMediaVolume, releaseMediaVolume, stableId, supportedFormats, type ApiLibraryEntry, type MediaItem } from "../lib/media";
 import { DEFAULT_CAPTION_PREFERENCES, DEFAULT_PLAYBACK_PREFERENCES, normalizeImageSeconds, playbackPreferencesFromState, type CaptionPreferences, type PlaybackPreferences } from "../lib/playback";
 import { clearPlaybackHandoff, readPlaybackHandoff } from "../lib/playback-handoff";
@@ -503,7 +505,11 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
   foregroundRef.current = foregroundMedia;
   const privateSession = useRef<PlaybackSession | null>(companionInstance ? restoreSharedPlaybackSession(getSessionUser()?.id) : null);
   const watchLocationSearch = () => companionRef.current ? new URL(companionRef.current.url, "http://tms.local").search : sharedWatchLocationSearch();
-  const detailsFromLocation = () => parseWatchDetails(watchLocationSearch());
+  const detailsFromLocation = () => {
+    const search = watchLocationSearch();
+    traceFromParams(new URLSearchParams(search));
+    return parseWatchDetails(search);
+  };
   const browseReturnUrlFromLocation = (details: WatchDetails | null) => browseReturnUrl(details, watchLocationSearch());
   const watchParamsFromItem = (item: MediaItem, base: WatchDetails) => paramsForItem(item, base, watchLocationSearch());
   const replaceWatchLocation = (url: string) => companionRef.current ? updateCompanionWatch(url) : replaceSharedWatchLocation(url);
@@ -656,6 +662,31 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     return companionRef.current ? next.filter(item => playsAlongside(item.path)) : next;
   });
   const [queueLoadStatus, setQueueLoadStatus] = useState<"idle" | "loading" | "error">("idle");
+  const queueTimingRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!details?.playAttemptId || !details.playAttemptStartedAt) return;
+    const trace = { id: details.playAttemptId, startedAt: details.playAttemptStartedAt };
+    if (queueLoadStatus === "loading") {
+      queueTimingRef.current = trace.id;
+      playbackTracePhase("queue_loading", {}, trace);
+      return;
+    }
+    if (queueTimingRef.current !== trace.id) return;
+    if (queueLoadStatus === "error") {
+      playbackTracePhase("queue_failed", {}, trace);
+      return;
+    }
+    playbackTracePhase("queue_ready", { queue_items: queue.length }, trace);
+    let painted = 0;
+    // The second frame runs after the first committed queue could be painted.
+    const frame = requestAnimationFrame(() => {
+      painted = requestAnimationFrame(() => {
+        queueTimingRef.current = null;
+        playbackTracePhase("queue_presented", { queue_items: queue.length, visibility: document.visibilityState }, trace);
+      });
+    });
+    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(painted); };
+  }, [details?.playAttemptId, details?.playAttemptStartedAt, queueLoadStatus, queue.length]);
   const [queueRetry, setQueueRetry] = useState(0);
   const draggedQueueIndexRef = useRef<number | null>(null);
   const [queueDropIndex, setQueueDropIndex] = useState<number | null>(null);
@@ -817,6 +848,8 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
   const qualityRequestRef = useRef(0);
   const activeTranscodeSessionRef = useRef<string | null>(null);
   const directPlaybackCompatibleRef = useRef(true);
+  // The device decodes the source video, so HLS can copy it instead of re-encoding.
+  const videoCopyableRef = useRef(false);
   const audioLanguageRef = useRef("en");
   const videoInfoCacheRef = useRef(new Map<string, VideoInfo>());
   const nextUserStateRef = useRef<{ path: string; userId: number | undefined; state: UserState } | null>(null);
@@ -861,6 +894,8 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
 
   useEffect(() => {
     const params = new URLSearchParams(watchLocationSearch());
+    const trace = traceFromParams(params);
+    playbackTracePhase("watch_navigation_arrived", {}, trace);
     const catalogPath = params.get("catalogPath");
     const catalogKind = params.get("catalogKind");
     if (!catalogPath || (catalogKind !== "movie" && catalogKind !== "series") || catalogResolutionStartedRef.current) return;
@@ -868,10 +903,14 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     // The library page deliberately navigates before this work begins. That
     // keeps every Play action responsive even when a title has many seasons.
     catalogResolutionStartedRef.current = true;
+    playbackTracePhase("catalog_resolution_started", {}, trace);
+    const resolutionStartedAt = Date.now();
     let cancelled = false;
     void (async () => {
       const entries: ApiLibraryEntry[] = [];
-      const folders: string[] = [];
+      // Needed only after the title's files are known, so fetch it alongside them.
+      const statePromise = sharedJson<UserState>(playbackUserStateUrl(API_BASE), authFetch)
+        .catch((): UserState => ({ favorites: [], playback: {} }));
       const catalogExtension = catalogPath.split("/").at(-1)?.split(".").at(-1)?.toLowerCase() ?? "";
       if (catalogKind === "movie" && (supportedFormats.video as readonly string[]).includes(catalogExtension)) {
         const separator = catalogPath.lastIndexOf("/");
@@ -884,44 +923,39 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
           if (directVideo) entries.push(directVideo);
         }
       }
-      if (!entries.length) folders.push(catalogPath);
-      const seenFolders = new Set<string>();
-      while (folders.length) {
-        const folder = folders.shift()!;
-        if (seenFolders.has(folder)) continue;
-        seenFolders.add(folder);
-        const query = new URLSearchParams({ folder, sort: "name", direction: "asc", limit: "100000" });
-        const response = await authFetch(`${API_BASE}/api/library?${query}`);
-        if (!response.ok) {
-          // A movie stored directly in a library is itself the catalog title.
-          // Resolve that exact file through its parent instead of trying to
-          // open the video path as a folder (which correctly returns 404).
-          if (response.status === 404 && catalogKind === "movie" && folder === catalogPath) {
-            const separator = catalogPath.lastIndexOf("/");
-            const parent = separator >= 0 ? catalogPath.slice(0, separator) : "";
-            const directQuery = new URLSearchParams({ folder: parent, sort: "name", direction: "asc", limit: "100000" });
-            const directResponse = await authFetch(`${API_BASE}/api/library?${directQuery}`);
-            if (directResponse.ok) {
-              const siblings = await directResponse.json() as ApiLibraryEntry[];
-              const directVideo = siblings.find((entry) => entry.kind !== "folder" && entry.path === catalogPath);
-              if (directVideo) {
-                entries.push(directVideo);
-                continue;
-              }
-            }
-          }
-          throw new Error(`Could not open this title (server returned ${response.status}).`);
+      if (!entries.length) {
+        // One recursive request covers every season. The queue reuses it.
+        let subtree: ApiLibraryEntry[] = [];
+        let failedStatus: number | undefined;
+        try {
+          subtree = await sharedJson<ApiLibraryEntry[]>(librarySubtreeUrl(API_BASE, catalogPath), authFetch);
+        } catch (error) {
+          failedStatus = (error as { status?: number }).status ?? 0;
         }
-        const children = await response.json() as ApiLibraryEntry[];
-        for (const entry of children) {
-          if (entry.kind === "folder") folders.push(entry.path);
-          else entries.push(entry);
+        const prefix = `${catalogPath}/`;
+        for (const entry of subtree) {
+          if (entry.kind !== "folder" && entry.path.startsWith(prefix)) entries.push(entry);
+        }
+        if (!entries.length && catalogKind === "movie") {
+          // A movie stored directly in a library is itself the catalog title.
+          // Resolve that exact file through its parent folder listing.
+          const separator = catalogPath.lastIndexOf("/");
+          const parent = separator >= 0 ? catalogPath.slice(0, separator) : "";
+          const directQuery = new URLSearchParams({ folder: parent, sort: "name", direction: "asc", limit: "100000" });
+          const directResponse = await authFetch(`${API_BASE}/api/library?${directQuery}`);
+          if (directResponse.ok) {
+            const siblings = await directResponse.json() as ApiLibraryEntry[];
+            const directVideo = siblings.find((entry) => entry.kind !== "folder" && entry.path === catalogPath);
+            if (directVideo) entries.push(directVideo);
+          }
+        }
+        if (!entries.length && failedStatus !== undefined) {
+          throw new Error(`Could not open this title (server returned ${failedStatus}).`);
         }
       }
       const videos = entries.map(apiEntryToMediaItem).filter((item): item is MediaItem => Boolean(item?.src && item.kind === "video"));
       if (!videos.length) throw new Error("No playable video was found for this title.");
-      const stateResponse = await authFetch(`${API_BASE}/api/user-state`);
-      const state = stateResponse.ok ? await stateResponse.json() as UserState : { favorites: [], playback: {} };
+      const state = await statePromise;
       const ordered = catalogKind === "movie"
         ? [...videos].sort((left, right) => (right.sizeBytes ?? 0) - (left.sizeBytes ?? 0))
         : [...videos].sort((left, right) => {
@@ -936,6 +970,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
       const targetProgress = playback[target.path ?? ""];
       const targetEpisode = episodeNumbers(`${target.parent ?? ""}/${target.name}`);
       const next = new URLSearchParams({ src: target.src!, name: target.name, size: target.size, folder: target.parent ?? catalogPath, kind: target.kind, catalog: "movies_tv", catalogKind: catalogKind === "series" ? "episode" : "movie", play: "1" });
+      if (trace) writePlaybackTrace(next, trace);
       const returnTo = params.get("return");
       if (returnTo?.startsWith("/") && !returnTo.startsWith("//") && !returnTo.startsWith("/watch")) next.set("return", returnTo);
       const suppliedImdb = params.get("imdb");
@@ -955,7 +990,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
             metadataQuery.set("seasons", String(targetEpisode.season));
             metadataQuery.set("episodes", String(targetEpisode.episode));
           }
-          const metadataResponse = await fetch(`${API_BASE}/api/title-metadata?${metadataQuery}`);
+          const metadataResponse = await authFetch(`${API_BASE}/api/title-metadata?${metadataQuery}`);
           if (metadataResponse.ok) {
             const metadata = await metadataResponse.json() as TitleMetadata;
             if (metadata.id?.startsWith("tt")) next.set("imdb", metadata.id);
@@ -964,9 +999,15 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
       }
       if (targetProgress && !targetProgress.completed && !(catalogKind === "series" && episodeFinished(targetProgress))) next.set("start", String(Math.floor(targetProgress.position)));
       if (cancelled) return;
+      playbackTracePhase("catalog_resolution_completed", { stage_duration_ms: Date.now() - resolutionStartedAt,
+        library_entries: entries.length, playable_items: videos.length }, trace);
       replaceWatchLocation(`/watch?${next.toString()}`);
       setDetails(detailsFromLocation());
     })().catch((error: unknown) => {
+      playbackTracePhase(cancelled ? "catalog_resolution_cancelled" : "catalog_resolution_failed", {
+        stage_duration_ms: Date.now() - resolutionStartedAt,
+        outcome: error instanceof Error ? error.name : "error",
+      }, trace);
       if (!cancelled) setCatalogResolveError(error instanceof Error ? error.message : "Could not open this title.");
     });
     return () => { cancelled = true; };
@@ -1189,18 +1230,30 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     setFavorite(false);
     setOrganizeActive(false);
     let cancelled = false;
+    let organizeTimer: ReturnType<typeof setTimeout> | undefined;
     const preparedState = nextUserStateRef.current;
     const cachedState = preparedState?.path === path && preparedState.userId === getSessionUser()?.id ? preparedState.state : null;
     if (cachedState) nextUserStateRef.current = null;
-    void (cachedState ? Promise.resolve({ ...cachedState, playback_preferences: playbackPreferences }) : authFetch(`${API_BASE}/api/user-state`)
-      .then((response) => response.ok ? response.json() as Promise<UserState> : { favorites: [], playback: {} }))
+    // Playback only needs progress and preferences. Tags and playlists make the
+    // full state ~10x larger, so they load afterwards for the organize button.
+    void (cachedState ? Promise.resolve({ ...cachedState, playback_preferences: playbackPreferences }) : sharedJson<UserState>(playbackUserStateUrl(API_BASE), authFetch)
+      .catch(() => ({ favorites: [], playback: {} }) as UserState))
       .then((state) => {
         if (cancelled) return;
         const playback = mergeWatchProgress(state.playback, readLocalWatchProgress(getSessionUser()?.id))[path] ?? null;
         setFavorite(state.favorites.includes(path));
-        const itemTags = state.tags?.[path] ?? [];
-        const inPlaylists = Object.values(state.playlists ?? {}).some((playlist) => playlist.paths.includes(path));
-        setOrganizeActive(itemTags.length > 0 || inPlaylists);
+        // Parsing the full state blocks the main thread, so wait until startup is done.
+        organizeTimer = setTimeout(() => {
+          void authFetch(`${API_BASE}/api/user-state`)
+            .then((response) => response.ok ? response.json() as Promise<UserState> : null)
+            .then((full) => {
+              if (cancelled || !full) return;
+              const itemTags = full.tags?.[path] ?? [];
+              const inPlaylists = Object.values(full.playlists ?? {}).some((playlist) => playlist.paths.includes(path));
+              setOrganizeActive(itemTags.length > 0 || inPlaylists);
+            })
+            .catch(() => undefined);
+        }, 3_000);
         setPlaybackPreferences(playbackPreferencesFromState(state.playback_preferences));
         setCaptionSelection(state.caption_selections?.[captionSelectionKey(details)] ?? null);
         setCaptionSelectionLoaded(true);
@@ -1225,7 +1278,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         setCaptionSelectionLoaded(true);
         setSavedPlaybackLoaded(true);
       });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(organizeTimer); };
   }, [details?.src, details?.kind, details?.startAt]);
 
   useEffect(() => {
@@ -1538,17 +1591,60 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     }
 
     setQueueLoadStatus("loading");
+    const queueTrace = details.playAttemptId && details.playAttemptStartedAt
+      ? { id: details.playAttemptId, startedAt: details.playAttemptStartedAt } : undefined;
+    playbackTracePhase("queue_requests_started", {}, queueTrace);
+    let queueBuildStartedAt = 0;
     const folderParam = details.folder ? `?folder=${encodeURIComponent(details.folder)}` : "";
     const fullQueueParam = details.queueFolder
       ? `?${new URLSearchParams({ folder: details.queueFolder, sort: details.queueSort ?? "name", direction: details.queueDirection === "asc" ? "asc" : "desc", offset: "0", limit: "999999" })}`
       : "";
+    // Fetch only the subtrees the queue can draw from. The whole library is
+    // tens of thousands of entries; a show's queue needs one folder tree.
+    const broadScopes = (() => {
+      const scopes: (string | undefined)[] = [];
+      if (details.customQueue) {
+        try {
+          const stored = JSON.parse(sessionStorage.getItem(PLAYBACK_QUEUE_KEY) ?? sessionStorage.getItem(LEGACY_PLAYBACK_QUEUE_KEY) ?? "null") as StoredPlaybackQueue | null;
+          if (stored && Array.isArray(stored.paths) && stored.paths.length) scopes.push(commonFolder(stored.paths));
+        } catch {
+        }
+      }
+      if (!details.queueFolder || details.customQueue) {
+        const suppliedSeries = details.series?.match(/(?:^|\/)Season[ ._-]*0*\d{1,3}$/i)
+          ? details.series.slice(0, details.series.lastIndexOf("/"))
+          : details.series;
+        const segments = details.folder.split("/").filter(Boolean);
+        const seasonIndex = segments.findIndex((segment) => /^(?:Season[ ._-]*0*\d{1,3}|Specials?)$/i.test(segment));
+        // Without a known show, series inference walks the folder's ancestors
+        // up to the second level, so that ancestor bounds what it can need.
+        scopes.push(suppliedSeries || (seasonIndex > 0 ? segments.slice(0, seasonIndex).join("/") : segments.length >= 2 ? segments.slice(0, 2).join("/") : undefined));
+      }
+      return queueFetchScopes(scopes);
+    })();
+    const broadEntries = Promise.all(broadScopes.map((scope) => (scope
+      ? sharedJson<ApiLibraryEntry[]>(librarySubtreeUrl(API_BASE, scope), authFetch)
+      : authFetch(`${API_BASE}/api/library`).then((response) => response.ok ? response.json() as Promise<ApiLibraryEntry[]> : []))
+      .catch((): ApiLibraryEntry[] => []))).then((lists) => lists.flat());
+    const folderEntries = () => authFetch(`${API_BASE}/api/library${folderParam}`)
+      .then((response) => response.ok ? response.json() as Promise<ApiLibraryEntry[]> : [])
+      .catch((): ApiLibraryEntry[] => []);
+    // When a fetched subtree already contains the open folder, show the queue
+    // from it right away; the folder listing only adds probed lengths later.
+    const folderCovered = Boolean(details.folder) && broadScopes.some((scope) => scope && (details.folder === scope || details.folder.startsWith(`${scope}/`)));
     void Promise.all([
-      authFetch(`${API_BASE}/api/library`).then((response) => response.ok ? response.json() as Promise<ApiLibraryEntry[]> : []),
-      details.folder ? authFetch(`${API_BASE}/api/library${folderParam}`).then((response) => response.ok ? response.json() as Promise<ApiLibraryEntry[]> : []) : Promise.resolve([]),
+      broadEntries,
+      folderCovered
+        ? broadEntries.then((entries) => entries.length ? [] : folderEntries())
+        : details.folder ? folderEntries() : Promise.resolve([]),
       details.queueFolder ? authFetch(`${API_BASE}/api/library${fullQueueParam}`).then((response) => response.ok ? response.json() as Promise<ApiLibraryEntry[]> : []) : Promise.resolve([]),
-      authFetch(`${API_BASE}/api/user-state`).then((response) => response.ok ? response.json() as Promise<UserState> : { favorites: [], playback: {} }).catch(() => ({ favorites: [] as string[], playback: {} })),
+      sharedJson<UserState>(playbackUserStateUrl(API_BASE), authFetch).catch((): UserState => ({ favorites: [], playback: {} })),
     ])
       .then(([entries1, entries2, queueEntries, state]) => {
+        queueBuildStartedAt = Date.now();
+        playbackTracePhase("queue_data_received", {
+          library_entries: entries1.length, folder_entries: entries2.length, sorted_entries: queueEntries.length,
+        }, queueTrace);
         const entryMap = new Map<string, ApiLibraryEntry>();
         for (const entry of entries1) entryMap.set(entry.path, entry);
         for (const entry of entries2) entryMap.set(entry.path, entry);
@@ -1722,10 +1818,24 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
       })
       .then((nextQueue) => {
         if (cancelled) return;
+        playbackTracePhase("queue_built", { queue_items: nextQueue.length,
+          stage_duration_ms: Date.now() - queueBuildStartedAt }, queueTrace);
         applyQueue(nextQueue);
         setQueueLoadStatus("idle");
+        if (!folderCovered || !nextQueue.length) return;
+        void folderEntries().then((entries) => {
+          const durations = new Map(entries.flatMap((entry) => entry.duration && entry.duration > 0 ? [[entry.path, entry.duration] as const] : []));
+          if (cancelled || !durations.size) return;
+          applyQueue((current) => current.map((item) => {
+            const known = item.path ? durations.get(item.path) : undefined;
+            return known && (!item.duration || item.duration <= 0) ? { ...item, duration: known } : item;
+          }));
+        });
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        playbackTracePhase(cancelled ? "queue_cancelled" : "queue_resolution_failed", {
+          outcome: error instanceof Error ? error.name : "error",
+        }, queueTrace);
         if (!cancelled) {
           applyQueue([]);
           setQueueLoadStatus("error");
@@ -2315,7 +2425,8 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
       const attemptParam = details.playAttemptId ? `&attempt_id=${encodeURIComponent(details.playAttemptId)}` : "";
       const audioParam = selectedAudio === null ? "" : `&audio_stream=${encodeURIComponent(selectedAudio)}`;
       const subtitleParam = selectedSubtitleStream === null ? "" : `&subtitle_stream=${encodeURIComponent(selectedSubtitleStream)}`;
-      const response = await fetch(`${API_BASE}/api/transcode?video_path=${encodeURIComponent(path)}&quality=${encodeURIComponent(streamQuality)}&start=${Math.max(0, Math.floor(resumeAt))}&buffer_size_mb=${bufferSizeMb}&session=${encodeURIComponent(session)}${attemptParam}${audioParam}${subtitleParam}`);
+      const copyParam = originalWithAac && videoCopyableRef.current ? "&copy_video=true" : "";
+      const response = await fetch(`${API_BASE}/api/transcode?video_path=${encodeURIComponent(path)}&quality=${encodeURIComponent(streamQuality)}&start=${Math.max(0, Math.floor(resumeAt))}&buffer_size_mb=${bufferSizeMb}&session=${encodeURIComponent(session)}${attemptParam}${audioParam}${subtitleParam}${copyParam}`);
       if (!response.ok) throw new Error("Quality switch failed");
       const { url, offset } = await response.json() as { url: string; offset: number; session: string };
       if (requestId !== qualityRequestRef.current || activeTranscodeSessionRef.current !== session) {
@@ -2331,7 +2442,10 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         const targetBufferSeconds = transcodeBufferSeconds(streamQuality, sourceHeightRef.current || sourceHeight, bufferSizeMb);
         const hls = new Hls({
           fLoader: cachedFragmentLoader(Hls.DefaultConfig.loader, preloadedFragmentsRef.current),
-          startPosition: 0,
+          // A copied stream begins at the keyframe before the resume point.
+          // Starting on that keyframe avoids decoding hidden frames first. Stay
+          // within the 2-second loading-target tolerance used by seeks.
+          startPosition: resumeAt - offset > 2 ? resumeAt - offset : 0,
           enableWorker: true,
           // Fixed-quality media playlists do not advertise a BANDWIDTH value, so
           // hls.js cannot turn maxBufferSize into a forward-buffer duration itself.
@@ -2613,7 +2727,8 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         sourceHeightRef.current = info.source_height;
         setSourceHeight(info.source_height);
         setQualityLevels(info.levels.filter((height) => height !== info.source_height));
-        directPlaybackCompatibleRef.current = info.audio_compatible && canDirectPlayVideo(info, videoRef.current);
+        videoCopyableRef.current = canDirectPlayVideo(info, videoRef.current);
+        directPlaybackCompatibleRef.current = info.audio_compatible && videoCopyableRef.current;
         const availableAudioTracks = info.audio_tracks ?? [];
         setAudioTracks(availableAudioTracks);
         setSelectedAudioStream(preferredAudioTrack(availableAudioTracks, audioLanguageRef.current)?.stream_index ?? null);
@@ -2701,7 +2816,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         videoInfoCacheRef.current.clear();
         videoInfoCacheRef.current.set(path, info);
         const audio = preferredAudioTrack(info.audio_tracks ?? [], language)?.stream_index ?? null;
-        const stateResponse = await authFetch(`${API_BASE}/api/user-state`, { signal });
+        const stateResponse = await authFetch(playbackUserStateUrl(API_BASE), { signal });
         if (!stateResponse.ok) return;
         const state = await stateResponse.json() as UserState;
         const userId = getSessionUser()?.id;
@@ -2709,7 +2824,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         // Keep the next episode's resume information fresh during long episodes,
         // so switching does not wait for another full user-state request.
         refreshTimer = setInterval(() => {
-          void authFetch(`${API_BASE}/api/user-state`, { signal }).then(async (response) => {
+          void authFetch(playbackUserStateUrl(API_BASE), { signal }).then(async (response) => {
             if (!response.ok) return;
             const refreshed = await response.json() as UserState;
             if (!signal.aborted && nextUserStateRef.current?.path === path && getSessionUser()?.id === userId) {
@@ -2738,6 +2853,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         nextPreloadRef.current = { path, session, quality: streamQuality, audio, subtitle, start };
         preloadedFragmentsRef.current.clear();
         const query = new URLSearchParams({ video_path: path, quality: streamQuality, start: String(start), session, preload: "true" });
+        if (canDirectPlayVideo(info, videoRef.current)) query.set("copy_video", "true");
         if (audio !== null) query.set("audio_stream", String(audio));
         if (subtitle !== null) query.set("subtitle_stream", String(subtitle));
         const response = await fetch(`${API_BASE}/api/transcode?${query}`, { signal });
@@ -2951,6 +3067,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     if (item.src === details.src) return;
     if (item.path && detailsMediaPath(details) && item.path === detailsMediaPath(details)) return;
     if (item.offline?.fileId && details.offlineFileId && item.offline.fileId === details.offlineFileId) return;
+    const trace = beginPlaybackTrace({ trigger: completed ? "auto_next" : "queue_select", media_name: item.name });
     ++qualityRequestRef.current;
     const video = videoRef.current;
     const activeMedia = backgroundAudioRef.current ?? video;
@@ -3018,21 +3135,11 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     setAudioTracksLoaded(false);
     setAudioTracks([]);
     setSelectedAudioStream(null);
-    const playAttemptId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    const playStartedAt = Date.now();
-    reportClientPerformance("play_click", 0, {
-      attempt_id: playAttemptId,
-      media_path: item.path ?? "",
-      media_name: item.name,
-      trigger: completed ? "auto_next" : "queue_select",
-    });
     const nextDetails: WatchDetails = {
       ...watchDetailsFromItem(item, details),
       playIntent: true,
-      playAttemptId,
-      playAttemptStartedAt: playStartedAt,
+      playAttemptId: trace.id,
+      playAttemptStartedAt: trace.startedAt,
     };
     const prepared = preparedVideoRef.current;
     if (!pip && prepared?.src === item.src && (videoSlotsRef.current[prepared.slot]?.readyState ?? 0) >= 2) {

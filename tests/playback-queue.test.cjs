@@ -154,7 +154,10 @@ function pageFunction(file, name, globals) {
   };
   visit(ast);
   assert.ok(declaration, `${name} exists in the production page`);
-  return vm.runInNewContext(ts.transpileModule(`(${declaration.initializer.getText(ast)})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, { URLSearchParams, ...globals });
+  return vm.runInNewContext(ts.transpileModule(`(${declaration.initializer.getText(ast)})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, {
+    URLSearchParams, beginPlaybackTrace: () => ({ id: 'test-attempt', startedAt: 1000 }),
+    playbackTracePhase() {}, writePlaybackTrace() {}, ...globals,
+  });
 }
 
 test('production Play all starts immediately and leaves player selection to the active item', () => {
@@ -169,6 +172,24 @@ test('production Play all starts immediately and leaves player selection to the 
   start(false);
   assert.equal(selected[0].name, 'first');
   assert.equal(selected[5].method, 'all');
+});
+
+test('catalog Play carries the click timestamp into Watch before episode resolution', () => {
+  const timing = load('app/lib/playback-trace.ts');
+  const attempt = { id: 'catalog-attempt', startedAt: 1234 };
+  let destination;
+  const play = pageFunction('app/page.tsx', 'playCatalogTitle', {
+    beginPlaybackTrace: () => attempt, writePlaybackTrace: timing.writePlaybackTrace,
+    titleMetadata: {}, titleMetadataKey: () => 'example',
+    window: { location: { pathname: '/', search: '?folder=Example' } },
+    navigateApp: url => { destination = url; },
+  });
+  play('Example/Show', 'series');
+  const params = new URLSearchParams(destination.split('?')[1]);
+  assert.equal(params.get('playAttempt'), attempt.id);
+  assert.equal(params.get('playStartedAt'), '1234');
+  assert.equal(params.get('catalogPath'), 'Example/Show');
+  assert.equal(params.get('return'), '/?folder=Example');
 });
 
 test('production item click queues audio and movies using the view context', () => {

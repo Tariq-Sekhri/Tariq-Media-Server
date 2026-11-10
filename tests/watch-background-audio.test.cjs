@@ -27,6 +27,7 @@ test('next video retains audio mode and promotes a ready preload outside picture
       backgroundAudioRef: ref({ currentTime: 50 }), audioOnlyRef: ref(true),
       nativeBackgroundRef: ref(background), continueBackgroundAudioRef: ref(false),
       controlsVisibleRef: ref(false), queue: [], imageSeconds: 5, pip, Date, crypto: { randomUUID: () => 'test' },
+      beginPlaybackTrace: () => ({ id: 'test', startedAt: Date.now() }),
       detailsMediaPath: (item) => item.path, getSessionUser: () => ({ id: 1 }),
       readLocalWatchProgress: () => ({}), restorePlaybackSession: () => ({}),
       selectPlaybackItem: () => ({}), watchDetailsFromItem: (item) => item,

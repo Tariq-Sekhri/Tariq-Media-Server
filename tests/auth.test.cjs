@@ -9,7 +9,7 @@ function setup(fetch = async () => new Response(null, { status: 200 })) {
     localStorage, fetch, navigator: { platform: 'test', userAgent: 'test' },
     crypto: { randomUUID: () => 'device' },
     window: { location: { pathname: '/', replace: (url) => redirects.push(url) } },
-  }, { './media': { API_BASE: '' } });
+  }, { './media': { API_BASE: '' }, './playback-trace': load('app/lib/playback-trace.ts') });
   return { auth, localStorage, redirects };
 }
 

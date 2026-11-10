@@ -1,4 +1,5 @@
 import { API_BASE } from "./media";
+import { configurePlaybackTraceReporter, startPlaybackRequest } from "./playback-trace";
 
 export type AdminPermissions = {
   access_admin_panel: boolean;
@@ -244,6 +245,7 @@ const reportSessionActivity = () => {
 };
 
 export const authFetch = async (input: string | URL, init: RequestInit = {}) => {
+  const timing = startPlaybackRequest(input, init);
   const token = getSessionToken();
   const send = () => {
     const headers = new Headers(init.headers);
@@ -252,6 +254,7 @@ export const authFetch = async (input: string | URL, init: RequestInit = {}) => 
   };
   const request = String(input);
   return send().then((response) => {
+    try { timing?.response(response); } catch { /* Diagnostics must not break a request. */ }
     if (response.status === 401 && typeof window !== "undefined") {
       if (getSessionToken() === token) {
         clearSession();
@@ -264,6 +267,7 @@ export const authFetch = async (input: string | URL, init: RequestInit = {}) => 
     if (response.ok && !request.endsWith("/api/auth/activity")) reportSessionActivity();
     return response;
   }).catch((error: unknown) => {
+    timing?.failed(error);
     if (isAbortError(error)) throw error;
     if (!request.endsWith("/api/client-errors")) {
       reportClientError(error, { kind: "api-network-error", source: request });
@@ -282,4 +286,5 @@ export const logOut = async () => {
 };
 
 // Restore the media cookie for sessions saved before it existed.
+configurePlaybackTraceReporter(reportClientPerformance);
 if (typeof window !== "undefined") getSessionToken();

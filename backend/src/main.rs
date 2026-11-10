@@ -295,6 +295,7 @@ struct LibraryQuery {
     sort: Option<String>,
     direction: Option<String>,
     folder: Option<String>,
+    under: Option<String>,
     offset: Option<usize>,
     limit: Option<usize>,
     // Playback queues need the inventory, not per-file thumbnail reads or probes.
@@ -1469,6 +1470,9 @@ struct TranscodeQuery {
     attempt_id: Option<String>,
     audio_stream: Option<u32>,
     subtitle_stream: Option<u32>,
+    /// The client can decode the source video, so FFmpeg may copy it.
+    #[serde(default)]
+    copy_video: bool,
 }
 
 #[derive(Deserialize)]
@@ -1500,6 +1504,11 @@ struct QualityResponse {
     duration: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     browser_media_url: Option<String>,
+    /// Lets HLS decide whether it can copy the video without another probe.
+    #[serde(skip)]
+    video_pix_fmt: Option<String>,
+    #[serde(skip)]
+    start_time: f64,
 }
 
 #[derive(Serialize, Clone)]
@@ -7919,9 +7928,15 @@ async fn windows_shell_move(source: &Path, destination: &Path) -> std::io::Resul
     }
 }
 
+#[derive(Default, Deserialize)]
+struct UserStateQuery {
+    view: Option<String>,
+}
+
 async fn user_state(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(query): Query<UserStateQuery>,
 ) -> Result<Json<UserState>, StatusCode> {
     let user = authenticated_user(&state, &headers)
         .await
@@ -7931,7 +7946,15 @@ async fn user_state(
         .users
         .remove(&user.id)
         .unwrap_or_default();
-    merge_instagram_tags(&state.user_state_path, &mut user_state).await;
+    if query.view.as_deref() == Some("playback") {
+        // Playback only needs progress, favorites, recency and preferences.
+        // Tags dominate the full state and would make every Play wait on them.
+        user_state.tags.clear();
+        user_state.tag_catalog.clear();
+        user_state.playlists.clear();
+    } else {
+        merge_instagram_tags(&state.user_state_path, &mut user_state).await;
+    }
     retain_visible_user_state(&user, &read_libraries(&state).await, &mut user_state);
     Ok(Json(user_state))
 }
@@ -14551,7 +14574,7 @@ async fn qualities(
 
     // Read video, audio languages and duration in one file probe.
     let output = hidden_async_command(&state.ffprobe_path)
-        .args(["-v", "error", "-show_entries", "stream=index,codec_type,codec_name,profile,height:stream_tags=language,title:stream_disposition=default:format=duration", "-of", "json"])
+        .args(["-v", "error", "-show_entries", "stream=index,codec_type,codec_name,profile,height,pix_fmt:stream_tags=language,title:stream_disposition=default:format=duration,start_time", "-of", "json"])
         .arg(&input).output().await.map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     if !output.status.success() { return Err(StatusCode::UNPROCESSABLE_ENTITY); }
     let probe: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
@@ -14603,6 +14626,8 @@ async fn qualities(
         source_height,
         video_codec: video_stream.and_then(|stream| stream["codec_name"].as_str()).map(str::to_owned),
         video_profile: video_stream.and_then(|stream| stream["profile"].as_str()).map(str::to_owned),
+        video_pix_fmt: video_stream.and_then(|stream| stream["pix_fmt"].as_str()).map(str::to_owned),
+        start_time: probe["format"]["start_time"].as_str().and_then(|value| value.parse::<f64>().ok()).filter(|value| value.is_finite()).unwrap_or(0.0),
         levels,
         audio_codec: audio_codec.clone(),
         audio_compatible,
@@ -14631,6 +14656,7 @@ async fn transcode(
     headers: HeaderMap,
     Query(query): Query<TranscodeQuery>,
 ) -> Result<Json<TranscodeResponse>, StatusCode> {
+    let received = Instant::now();
     let input = safe_library_path(&state.library_root, &query.video_path)?;
     let start = query.start.unwrap_or(0.0).max(0.0).floor() as u64;
     let buffer_size_mb = query.buffer_size_mb.unwrap_or(500);
@@ -14741,7 +14767,23 @@ async fn transcode(
     if !source.levels.contains(&height) {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let (key, url) = transcode_key_and_url(&query.video_path, height, start, audio_stream, subtitle_stream);
+    // Copying the video avoids encoding before the first segment exists, so
+    // playback starts in a fraction of a second instead of after several.
+    let probe_started = Instant::now();
+    let copy_seek = if query.copy_video && height == source.source_height && subtitle_stream.is_none() {
+        copy_video_seek(&state, &input, &source, start).await
+    } else {
+        None
+    };
+    tracing::info!(
+        reason = "playback_hls_copy_decision",
+        attempt_id = ?query.attempt_id,
+        copy_seek = ?copy_seek,
+        prepare_ms = received.elapsed().as_millis() as u64,
+        keyframe_probe_ms = probe_started.elapsed().as_millis() as u64,
+        "Chose HLS video mode"
+    );
+    let (key, url) = transcode_key_and_url(&query.video_path, height, start, audio_stream, subtitle_stream, copy_seek.is_some());
     ensure_transcode(
         &state,
         &input,
@@ -14755,13 +14797,46 @@ async fn transcode(
         audio_stream,
         subtitle_stream,
         query.preload,
+        copy_seek,
     )
     .await?;
     Ok(Json(TranscodeResponse {
         url,
-        offset: start as f64,
+        offset: copy_seek.unwrap_or(start as f64),
         session,
     }))
+}
+
+/// When the source video is browser-safe H.264, returns the keyframe at or
+/// before `start`. Both streams begin there, so copied video and encoded audio
+/// stay aligned without an accurate (decoding) seek.
+async fn copy_video_seek(state: &AppState, input: &Path, source: &QualityResponse, start: u64) -> Option<f64> {
+    if !video_codec_is_remux_safe(source.video_codec.as_deref()?) { return None; }
+    if !matches!(source.video_pix_fmt.as_deref()?, "yuv420p" | "yuvj420p") { return None; }
+    if start == 0 { return Some(0.0); }
+    let start_time = source.start_time;
+    let output = hidden_async_command(&state.ffprobe_path)
+        .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", "-read_intervals"])
+        .arg(format!("{}%{}", start.saturating_sub(12), start + 1))
+        .arg(input)
+        .output()
+        .await
+        .ok()
+        .filter(|output| output.status.success())?;
+    keyframe_at_or_before(&String::from_utf8_lossy(&output.stdout), start as f64 + start_time)
+        .map(|keyframe| (keyframe - start_time).max(0.0))
+}
+
+fn keyframe_at_or_before(packets: &str, target: f64) -> Option<f64> {
+    packets
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.trim().split(',');
+            let pts = fields.next()?.parse::<f64>().ok().filter(|pts| pts.is_finite())?;
+            fields.next()?.starts_with('K').then_some(pts)
+        })
+        .filter(|pts| *pts <= target + 0.001)
+        .reduce(f64::max)
 }
 
 async fn auto_transcode_variant(
@@ -14803,7 +14878,7 @@ async fn auto_transcode_variant(
         None
     };
     let (key, url) =
-        transcode_key_and_url(&query.video_path, query.height, query.start, audio_stream, subtitle_stream);
+        transcode_key_and_url(&query.video_path, query.height, query.start, audio_stream, subtitle_stream, false);
     ensure_transcode(
         &state,
         &input,
@@ -14817,6 +14892,7 @@ async fn auto_transcode_variant(
         audio_stream,
         subtitle_stream,
         false,
+        None,
     )
     .await?;
     Ok(Redirect::temporary(&url))
@@ -15027,12 +15103,14 @@ fn transcode_key_and_url(
     start: u64,
     audio_stream: Option<u32>,
     subtitle_stream: Option<u32>,
+    copy_video: bool,
 ) -> (String, String) {
     let mut hasher = DefaultHasher::new();
     // Keep this version in the cache key so streams produced with an older,
     // browser-incompatible pixel format are never reused.
     "v16-accurate-seek-av-timing"
         .hash(&mut hasher);
+    if copy_video { "copy-video-keyframe-start".hash(&mut hasher); }
     video_path.hash(&mut hasher);
     height.hash(&mut hasher);
     start.hash(&mut hasher);
@@ -15065,7 +15143,9 @@ async fn ensure_transcode(
     audio_stream: Option<u32>,
     subtitle_stream: Option<u32>,
     preload: bool,
+    copy_seek: Option<f64>,
 ) -> Result<(), StatusCode> {
+    let startup_segments = if copy_seek.is_some() { 1 } else { HLS_STARTUP_SEGMENTS };
     // This lock only protects inspecting/replacing the shared HLS directory
     // and registering the child. Do not hold it while waiting for FFmpeg's
     // first segment: a replacement player session must be able to join the
@@ -15145,7 +15225,7 @@ async fn ensure_transcode(
                 "Joined active FFmpeg transcode without launching another process"
             );
             drop(start_guard);
-            return wait_for_playlist(state, key, &playlist, attempt_id).await;
+            return wait_for_playlist(state, key, &playlist, attempt_id, startup_segments).await;
         }
         // A marker without an active child cannot ever produce a playlist.
         // This commonly follows a rapid player-session replacement; waiting
@@ -15180,7 +15260,8 @@ async fn ensure_transcode(
     // the earlier keyframe. That creates an audio gap at the start of resumed
     // HLS streams. Encode both timelines accurately, using CPU H.264 here to
     // avoid the D3D/OpenCL initialization hang on original-resolution playback.
-    let software_video = if height == source_height && subtitle_stream.is_none() {
+    let copy_video = copy_seek.is_some();
+    let software_video = if !copy_video && height == source_height && subtitle_stream.is_none() {
         hidden_async_command(&state.ffprobe_path)
             .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of", "default=noprint_wrappers=1:nokey=1"])
             .arg(input)
@@ -15193,7 +15274,7 @@ async fn ensure_transcode(
     // Bitmap PGS captions cannot be delivered as browser WebVTT. When the
     // user selects one, decode and overlay it in FFmpeg instead. This is a
     // separate CPU path because the subtitle decoder produces software frames.
-    if subtitle_stream.is_none() && !software_video {
+    if subtitle_stream.is_none() && !software_video && !copy_video {
         command.args([
             "-init_hw_device",
             "d3d11va=d3d",
@@ -15212,9 +15293,12 @@ async fn ensure_transcode(
         ]);
     }
     command.args(["-readrate", "16"]);
-    let input_start = start as f64 + prefix_seconds;
+    let input_start = copy_seek.unwrap_or(start as f64) + prefix_seconds;
     if input_start > 0.0 {
-        command.args(["-ss", &input_start.to_string()]);
+        // A copied stream seeks to the keyframe at or before -ss. Aim just
+        // past the known keyframe so float rounding never selects the previous one.
+        let seek = if copy_video { input_start + 0.02 } else { input_start };
+        command.args(["-ss", &seek.to_string()]);
         if subtitle_stream.is_some() {
             // Input seeking normally resets PGS timestamps while the subtitle
             // decoder keeps their original timing. Preserve and rebase both
@@ -15243,7 +15327,9 @@ async fn ensure_transcode(
     } else {
         command.args(["-map", "0:a:0?"]);
     }
-    if subtitle_stream.is_none() && !software_video {
+    if copy_video {
+        command.args(["-c:v", "copy"]);
+    } else if subtitle_stream.is_none() && !software_video {
         // AMF H.264 accepts 8-bit NV12 only. Keep this conversion even when
         // source height matches: Main 10 sources otherwise reach AMF as P010.
         command.args([
@@ -15286,13 +15372,11 @@ async fn ensure_transcode(
             "4",
         ]);
     }
-    command.args(["-force_key_frames", &force_key_frames_expr]);
+    if !copy_video {
+        command.args(["-force_key_frames", &force_key_frames_expr, "-g", "48", "-keyint_min", "48"]);
+    }
     command
         .args([
-            "-g",
-            "48",
-            "-keyint_min",
-            "48",
             "-c:a",
             "aac",
             "-ac",
@@ -15324,6 +15408,7 @@ async fn ensure_transcode(
     tracing::info!(
         reason = "playback_hls_new_transcode",
         software_video,
+        copy_video,
         preload,
         prefix_seconds,
         audio_stream = ?audio_stream,
@@ -15371,7 +15456,7 @@ async fn ensure_transcode(
         }
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
-    wait_for_playlist(state, key, &playlist, attempt_id).await
+    wait_for_playlist(state, key, &playlist, attempt_id, startup_segments).await
 }
 
 async fn wait_for_playlist(
@@ -15379,11 +15464,12 @@ async fn wait_for_playlist(
     key: &str,
     playlist: &Path,
     attempt_id: Option<&str>,
+    startup_segments: usize,
 ) -> Result<(), StatusCode> {
     let started = std::time::Instant::now();
     for _ in 0..600 {
         if let Some(segment_count) =
-            playlist_playable_segment_count(playlist, HLS_STARTUP_SEGMENTS).await
+            playlist_playable_segment_count(playlist, startup_segments).await
         {
             tracing::info!(
                 target: "tms_server::playback",
@@ -15391,7 +15477,7 @@ async fn wait_for_playlist(
                 transcode_key = %key,
                 attempt_id = ?attempt_id,
                 segment_count,
-                minimum_segments = HLS_STARTUP_SEGMENTS,
+                minimum_segments = startup_segments,
                 wait_ms = started.elapsed().as_millis() as u64,
                 "HLS transcode playlist ready for playback"
             );
@@ -15426,7 +15512,7 @@ async fn wait_for_playlist(
         reason = "playback_hls_ready_timeout",
         transcode_key = %key,
         attempt_id = ?attempt_id,
-        minimum_segments = HLS_STARTUP_SEGMENTS,
+        minimum_segments = startup_segments,
         wait_ms = started.elapsed().as_millis() as u64,
         "Timed out waiting for the first HLS segment"
     );
@@ -15593,6 +15679,61 @@ async fn cached_library_scan(
     Ok(entries)
 }
 
+const LIBRARY_SUBTREE_MAX_DEPTH: usize = 32;
+
+/// Placeholder folder rows for `under` and its ancestors. Catalog annotation
+/// needs the enclosing title folder to classify episodes; the response drops
+/// these rows again.
+fn library_subtree_ancestors(under: &str) -> Vec<LibraryEntry> {
+    let parts = under.split('/').collect::<Vec<_>>();
+    (1..=parts.len())
+        .map(|depth| LibraryEntry {
+            path: parts[..depth].join("/"),
+            device_path: None,
+            name: parts[depth - 1].to_owned(),
+            kind: "folder",
+            preview_path: None,
+            preview_kind: None,
+            item_count: None,
+            catalog_kind: None,
+            catalog_title_path: None,
+            size: 0,
+            created_at: 0,
+            duration: None,
+            thumbnail_aspect_ratio: None,
+            modified_at: 0,
+        })
+        .collect()
+}
+
+/// Every entry below `under`, read folder by folder exactly like a folder
+/// listing (so mounted folders behave the same), but in one request.
+fn scan_library_subtree(
+    root: &Path,
+    under: &str,
+    libraries: &BTreeMap<String, LibraryConfig>,
+) -> Result<Vec<LibraryEntry>, StatusCode> {
+    let start = safe_library_path(root, under)?;
+    if !start.is_dir() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let mut entries = library_subtree_ancestors(under);
+    let mut folders = vec![(start, 0usize)];
+    while let Some((folder, depth)) = folders.pop() {
+        let children = scan_folder(root, &folder, libraries);
+        if depth < LIBRARY_SUBTREE_MAX_DEPTH {
+            folders.extend(
+                children
+                    .iter()
+                    .filter(|entry| entry.kind == "folder")
+                    .map(|entry| (root.join(&entry.path), depth + 1)),
+            );
+        }
+        entries.extend(children);
+    }
+    Ok(entries)
+}
+
 async fn library(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -15620,18 +15761,43 @@ async fn library(
     if requested_folder.is_some_and(|folder| !can_view_library_path(&user, &libraries, folder)) {
         return (StatusCode::NOT_FOUND, Json(Vec::<LibraryEntry>::new())).into_response();
     }
-    let mut entries = match cached_library_scan(
-        &state,
-        requested_folder.map(str::to_owned),
-        libraries.clone(),
-    )
-    .await
-    {
+    // `under` returns one recursive subtree (for example a show's seasons)
+    // without serializing and annotating the entire library.
+    let requested_subtree = query
+        .under
+        .as_deref()
+        .map(|path| path.trim().trim_matches('/'))
+        .filter(|path| !path.is_empty())
+        .filter(|_| requested_folder.is_none());
+    if requested_subtree.is_some_and(|under| !can_view_library_path(&user, &libraries, under)) {
+        return (StatusCode::NOT_FOUND, Json(Vec::<LibraryEntry>::new())).into_response();
+    }
+    let scanned = match requested_subtree {
+        Some(under) => {
+            let root = state.library_root.clone();
+            let under = under.to_owned();
+            let libraries = libraries.clone();
+            tokio::task::spawn_blocking(move || scan_library_subtree(&root, &under, &libraries))
+                .await
+                .unwrap_or(Err(StatusCode::INTERNAL_SERVER_ERROR))
+        }
+        None => {
+            cached_library_scan(&state, requested_folder.map(str::to_owned), libraries.clone())
+                .await
+        }
+    };
+    let mut entries = match scanned {
         Ok(entries) => entries,
         Err(status) => return (status, Json(Vec::<LibraryEntry>::new())).into_response(),
     };
     entries.retain(|entry| can_view_library_path(&user, &libraries, &entry.path));
     annotate_catalog_entries(&mut entries, &libraries);
+    if let Some(under) = requested_subtree {
+        // Ancestors were only included so catalog annotation could see the
+        // enclosing title folder.
+        let prefix = format!("{under}/");
+        entries.retain(|entry| entry.path.starts_with(&prefix));
+    }
     let sort = query.sort.as_deref().unwrap_or("opened");
     apply_cached_library_durations(&state, &mut entries).await;
     if sort == "length" {
@@ -19604,6 +19770,41 @@ mod tests {
     }
 
     #[test]
+    fn library_subtree_reads_every_season_of_one_title_only() {
+        let root = std::env::temp_dir().join(format!("tms-subtree-{}", uuid::Uuid::new_v4()));
+        for folder in ["TV/Show/Season 01", "TV/Show/Season 02", "TV/Show 2"] {
+            std::fs::create_dir_all(root.join(folder)).unwrap();
+        }
+        for file in ["TV/Show/Season 01/Show S01E01.mkv", "TV/Show/Season 02/Show S02E01.mkv", "TV/Show 2/Other S01E01.mkv"] {
+            std::fs::write(root.join(file), b"x").unwrap();
+        }
+        let mut libraries = BTreeMap::new();
+        libraries.insert(
+            "TV".to_owned(),
+            serde_json::from_value::<LibraryConfig>(serde_json::json!({ "content_type": "movies_tv" })).unwrap(),
+        );
+        let mut entries = scan_library_subtree(&root, "TV/Show", &libraries).unwrap();
+        annotate_catalog_entries(&mut entries, &libraries);
+        entries.retain(|entry| entry.path.starts_with("TV/Show/"));
+        let mut files = entries
+            .iter()
+            .filter(|entry| entry.kind == "file")
+            .map(|entry| (entry.path.as_str(), entry.catalog_kind))
+            .collect::<Vec<_>>();
+        files.sort();
+        assert_eq!(
+            files,
+            [
+                ("TV/Show/Season 01/Show S01E01.mkv", Some("episode")),
+                ("TV/Show/Season 02/Show S02E01.mkv", Some("episode")),
+            ]
+        );
+        assert_eq!(scan_library_subtree(&root, "TV/Missing", &libraries).err(), Some(StatusCode::NOT_FOUND));
+        assert_eq!(scan_library_subtree(&root, "../x", &libraries).err(), Some(StatusCode::BAD_REQUEST));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn media_cookie_is_read_from_the_cookie_header() {
         let mut headers = HeaderMap::new();
         headers.insert("cookie", HeaderValue::from_static("a=1; tms_session=tok-1; b=2"));
@@ -21038,16 +21239,26 @@ mod tests {
             AudioTrack { stream_index: 2, label: "English".into(), language: "eng".into(), is_default: false },
         ];
         assert_eq!(default_audio_stream(&tracks), Some(2));
-        let (english, _) = transcode_key_and_url("episode.mkv", 1080, 0, Some(2), None);
-        let (japanese, _) = transcode_key_and_url("episode.mkv", 1080, 0, Some(1), None);
+        let (english, _) = transcode_key_and_url("episode.mkv", 1080, 0, Some(2), None, false);
+        let (japanese, _) = transcode_key_and_url("episode.mkv", 1080, 0, Some(1), None, false);
         assert_ne!(english, japanese);
     }
 
     #[test]
     fn continuous_transcode_cache_is_anchored_to_the_seek_position() {
-        let (beginning, _) = transcode_key_and_url("Shows/Episode.mkv", 1080, 0, Some(1), None);
-        let (seeked, _) = transcode_key_and_url("Shows/Episode.mkv", 1080, 600, Some(1), None);
+        let (beginning, _) = transcode_key_and_url("Shows/Episode.mkv", 1080, 0, Some(1), None, false);
+        let (seeked, _) = transcode_key_and_url("Shows/Episode.mkv", 1080, 600, Some(1), None, false);
         assert_ne!(beginning, seeked);
+        let (copied, _) = transcode_key_and_url("Shows/Episode.mkv", 1080, 0, Some(1), None, true);
+        assert_ne!(beginning, copied);
+    }
+
+    #[test]
+    fn copied_video_starts_at_the_keyframe_before_the_resume_point() {
+        let packets = "570.000000,K__\n571.001000,___\n574.170000,K__\n575.000000,___\nN/A,K__\n602.000000,K__\n";
+        assert_eq!(keyframe_at_or_before(packets, 600.0), Some(574.17));
+        assert_eq!(keyframe_at_or_before(packets, 574.17), Some(574.17));
+        assert_eq!(keyframe_at_or_before(packets, 500.0), None);
     }
 
     #[test]
