@@ -2712,7 +2712,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     setAudioTracksLoaded(false);
     setAudioTracks([]);
     setSelectedAudioStream(null);
-    if (details.offline) {
+    if (details.offline || details.kind === "audio") {
       directPlaybackCompatibleRef.current = true;
       setAudioCompatibilityChecked(true);
       setAudioTracksLoaded(true);
@@ -3093,9 +3093,10 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         label: details.queueLabel, returnUrl: browseReturnUrlFromLocation(details), complete: true, time: 0, playing: true });
     const nextSession = { ...selectPlaybackItem(baseSession, item), queue, source: details.queueSource ? queueSourceForItem(details.queueSource, item) : undefined, complete: true,
       time: item.kind === "audio" && audioProgress && !audioProgress.completed ? audioProgress.position : 0, handoff: item.kind === "audio", watchEntry: true };
-    setPlaybackSession(nextSession);
+    if (item.kind === "audio" && companionRef.current) setSharedPlaybackSession(nextSession);
+    else setPlaybackSession(nextSession);
     queueNavigationPathRef.current = item.path ?? null;
-    if (item.kind === "audio" && !companionRef.current) {
+    if (item.kind === "audio") {
       exitingRef.current = true;
       // Audio continues in the audio mini player. Leaving replaces or pops
       // the Watch entry, so Back never walks the queue.

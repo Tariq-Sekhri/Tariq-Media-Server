@@ -77,7 +77,7 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
       const progress = readLocalWatchProgress(active.userId)[nextItem.path ?? ""];
       const next = { ...selectPlaybackItem(active, nextItem, playing), time: progress && !progress.completed ? progress.position : 0 };
       setPlaybackSession(next);
-      if (nextItem.kind !== "audio" || playsAlongside(nextItem.path)) {
+      if (nextItem.kind !== "audio") {
         window.dispatchEvent(new Event("tms:before-watch"));
         // Watch restores this same session from its URL.
         const target = { ...(playbackSessionSnapshot() ?? next), watchEntry: true };
@@ -87,7 +87,8 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
     } catch (error) { setQueueFailure({ id: latest.id, message: error instanceof Error ? error.message : "Could not open media" }); }
   };
 
-  const active = !playsAlongside(session?.item.path) && session?.item.kind === "audio" && !pathname?.startsWith("/watch") && session.userId === getSessionUser()?.id;
+  const active = session?.item.kind === "audio" && session.userId === getSessionUser()?.id
+    && (!pathname?.startsWith("/watch") || playsAlongside(session.item.path));
   return <>{children}{active && session ? <>
     {queueError ? <div className="playback-queue-status" role="status">{queueError} {session.source && !session.complete
       ? <button type="button" onClick={() => { setQueueFailure(null); setQueueRetry((value) => value + 1); }}>Retry queue</button>

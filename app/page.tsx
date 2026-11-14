@@ -8,7 +8,6 @@ import { useBackLayer } from "./lib/back-layers";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import MobileNavigation from "./MobileNavigation";
 import LibraryPlaybackSettings from "./LibraryPlaybackSettings";
-import { playsAlongside } from "./lib/library-playback";
 import { Capacitor } from "@capacitor/core";
 import { API_BASE, ancestorTags, inheritedTags, resolveEpisodeMetadata, apiEntryToMediaItem, episodeNumbers, formatBytes, isMovieWatch, isShowWatch, mediaEvidenceForFolder, mediaUrl, previewFrameUrl, gridThumbUrl, seasonNumberForFolder, stableId, supportedFormats, titleCollectionForFolder, titleCollectionSortOrder, volumeFromSlider, volumeLabelFromSlider, sliderFromVolume, type ApiLibraryEntry, type MediaItem } from "./lib/media";
 import { completeSearchToken, fuzzyMatches, matchesSearchQuery, parseSearchQuery, searchCompletionContext, searchFields } from "./lib/search";
@@ -3594,7 +3593,7 @@ export default function Home() {
       returnUrl: `${window.location.pathname}${window.location.search}`,
       watchEntry: item.kind !== "audio", complete: !source, time: !savesWatchProgress(item.path) ? 0 : startAt ?? (savedAudio && !savedAudio.completed ? savedAudio.position : 0), playing: true,
     });
-    if (item.kind === "audio" && !playsAlongside(item.path)) {
+    if (item.kind === "audio") {
       void recordAccess(item.path);
       return;
     }

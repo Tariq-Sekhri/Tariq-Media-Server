@@ -32,7 +32,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
     };
     // Starting audio hands playback to the audio mini player.
     const stopVideoForAudio = () => {
-      if (playbackSessionSnapshot()?.item.kind === "audio" && appShellSnapshot().watch?.mode === "mini") closeWatch();
+      const audio = playbackSessionSnapshot()?.item;
+      if (audio?.kind === "audio" && !playsAlongside(audio.path) && appShellSnapshot().watch?.mode === "mini") closeWatch();
     };
     const preferencesChanged = () => reconcileCompanionWatch();
     window.addEventListener(LIBRARY_PLAYBACK_EVENT, preferencesChanged);

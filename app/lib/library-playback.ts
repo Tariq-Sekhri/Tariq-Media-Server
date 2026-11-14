@@ -44,5 +44,7 @@ export const startsFresh = (path?: string | null) => setting(path, "startFresh")
 export const playsAlongside = (path?: string | null) => alongsideAvailable() && setting(path, "alongside");
 export const watchPlaysAlongside = (url: string) => {
   const params = new URL(url, "http://tms.local").searchParams;
+  // Audio belongs to the audio player, including links saved by older apps.
+  if (params.get("kind") === "audio") return false;
   return playsAlongside(params.get("path") ?? params.get("folder") ?? "");
 };
