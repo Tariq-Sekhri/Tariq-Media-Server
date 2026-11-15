@@ -5,6 +5,7 @@
 
 import { useAppConfirm } from "./AppConfirmProvider";
 import { useBackLayer } from "./lib/back-layers";
+import { createServerConnectionCheck } from "./lib/server-connection";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import MobileNavigation from "./MobileNavigation";
 import LibraryPlaybackSettings from "./LibraryPlaybackSettings";
@@ -37,7 +38,7 @@ import { startPlaybackSession, playbackSessionSnapshot, setPlaybackSession } fro
 import { hydrateNativeWatchProgress } from "./lib/native-watch-progress";
 import { mergeWatchProgress, readLocalWatchProgress, savesWatchProgress, syncLocalWatchProgress, writeLocalWatchProgress } from "./lib/watch-progress";
 import RichTextEditor from "./RichTextEditor";
-import { authorizeOfflineSync, chooseOfflineLocation, clearPendingOfflineFavorite, clearPendingOfflineOrganization, hydratePendingOfflineChanges, listOfflineBundles, makeAvailableOffline, offlineLocation, openConfiguredTmsServer, openOfflineFile, pendingOfflineFavoriteOverrides, queueOfflineFavorite, queueOfflineOrganization, queueOfflinePlaylistCreate, queueOfflinePlaylistDelete, queueOfflineTagCreate, queueOfflineTagDelete, readOfflineUserState, readPendingOfflineChanges, reconnectOfflineFolders, reconcileOfflineBundle, removeOfflineBundle, resolveOfflineFileUrl, retryOfflineBundle, saveOfflineUserState, syncPendingOfflineOrganization, type OfflineBundle, type OfflineFile } from "./lib/offline";
+import { chooseOfflineLocation, clearPendingOfflineFavorite, clearPendingOfflineOrganization, hydratePendingOfflineChanges, listOfflineBundles, makeAvailableOffline, offlineLocation, openConfiguredTmsServer, openOfflineFile, pendingOfflineFavoriteOverrides, queueOfflineFavorite, queueOfflineOrganization, queueOfflinePlaylistCreate, queueOfflinePlaylistDelete, queueOfflineTagCreate, queueOfflineTagDelete, readOfflineUserState, readPendingOfflineChanges, reconnectOfflineFolders, reconcileOfflineBundle, removeOfflineBundle, resolveOfflineFileUrl, retryOfflineBundle, saveOfflineUserState, syncPendingOfflineOrganization, type OfflineBundle, type OfflineFile } from "./lib/offline";
 import { applyPendingOrganization, emptyPendingChanges, isOfflinePlaylistId, type PendingOrganization } from "./lib/offline-organization";
 import { buildOfflineAllMediaItems, buildOfflineBrowseItems, findOfflineBundleForFolder, offlineArtworkKey, offlineFolderFromLocation, offlineLocationFromFolder, offlinePlaybackKey } from "./lib/offline-browse";
 import { addNativeHomeScreenShortcut } from "./lib/native-shortcuts";
@@ -1177,6 +1178,7 @@ export default function Home() {
   const [sidebarContext, setSidebarContext] = useState<SidebarContext | null>(null);
   const [backendState, setBackendState] = useState<BackendState>(() => (initialSnapshot && initialSnapshot.items.length > 0) ? "online" : "loading");
   const [backendError, setBackendError] = useState("");
+  const checkServerConnectionRef = useRef<(() => Promise<void>) | null>(null);
   const [offlineBundles, setOfflineBundles] = useState<OfflineBundle[]>([]);
   const [offlineLocationName, setOfflineLocationName] = useState<string>();
   const [offlineBusy, setOfflineBusy] = useState(false);
@@ -1621,39 +1623,24 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    let checking = false;
-    let failures = 0;
-    // One slow probe is not an outage: the browser can queue it behind
-    // uploads or other long requests to the same host. Only consecutive
-    // failures send the app to Offline.
-    const failed = () => {
-      failures += 1;
-      if (!cancelled && failures >= 3) setBackendState("offline");
-    };
-    const checkConnection = async () => {
-      if (checking) return;
-      checking = true;
-      try {
+    const connection = createServerConnectionCheck(
+      async () => {
         const response = await fetch(`${API_BASE}/api/health`, { cache: "no-store", signal: AbortSignal.timeout(8_000) });
-        if (cancelled) return;
-        if (response.ok) {
-          failures = 0;
-          setBackendState("online");
-        } else failed();
-      } catch {
-        failed();
-      } finally { checking = false; }
-    };
-    const onOffline = () => setBackendState("offline");
+        return response.ok;
+      },
+      (online) => setBackendState(online ? "online" : "offline"),
+    );
+    const checkConnection = () => connection.check();
+    checkServerConnectionRef.current = checkConnection;
     window.addEventListener("online", checkConnection);
-    window.addEventListener("offline", onOffline);
+    window.addEventListener("offline", checkConnection);
     const timer = window.setInterval(checkConnection, 5_000);
     return () => {
-      cancelled = true;
+      connection.stop();
+      checkServerConnectionRef.current = null;
       window.clearInterval(timer);
       window.removeEventListener("online", checkConnection);
-      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("offline", checkConnection);
     };
   }, []);
 
@@ -2269,15 +2256,9 @@ export default function Home() {
       } catch (error) {
         if (cancelled || isAbortError(error)) return;
         setBackendError(error instanceof Error ? error.message : "Could not reach the server");
-        // A slow or failed library request alone does not mean the server is
-        // gone; only switch to Offline when its health check agrees.
-        const reachable = await fetch(`${API_BASE}/api/health`, { cache: "no-store", signal: AbortSignal.timeout(8_000) })
-          .then((response) => response.ok, () => false);
-        if (cancelled || reachable) return;
-        setBackendState("offline");
-        setSection("offline");
-        setCurrentFolder(null);
-        void refreshOfflineDownloads();
+        // Use the same consecutive-failure policy as periodic probes. A
+        // transient request error must not navigate away from this folder.
+        await checkServerConnectionRef.current?.();
       }
       }
     };
@@ -4462,19 +4443,6 @@ export default function Home() {
       setOfflineBusy(false);
     }
   };
-  const syncOfflineFolders = async () => {
-    if (offlineBusy) return;
-    setOfflineBusy(true);
-    try {
-      for (const bundle of offlineBundles.filter((entry) => entry.kind === "folder")) await authorizeOfflineSync(bundle);
-      setOfflineSyncError("");
-      setOfflineCatalogSyncTick((value) => value + 1);
-    } catch (error) {
-      setOfflineSyncError(error instanceof Error ? error.message : "Could not sync offline folders.");
-    } finally {
-      setOfflineBusy(false);
-    }
-  };
   const chooseOfflineDownloadLocation = async () => {
     if (offlineBusy) return;
     setOfflineBusy(true);
@@ -6272,6 +6240,29 @@ export default function Home() {
     };
   }, [items, backendState]);
 
+  const libraryViewControls = (
+    <div className="view-toggle" role="group" aria-label="Library view">
+                  <button
+                    type="button"
+                    className={libraryView === "grid" ? "active" : ""}
+                    aria-pressed={libraryView === "grid"}
+                    aria-label="Grid view"
+                    onClick={() => selectLibraryView("grid")}
+                  >
+                    <MenuIcon name="grid" /><span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>Grid view</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={libraryView === "list" ? "active" : ""}
+                    aria-pressed={libraryView === "list"}
+                    aria-label="List view"
+                    onClick={() => selectLibraryView("list")}
+                  >
+                    <MenuIcon name="list" /><span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>List view</span>
+                  </button>
+                </div>
+  );
+
   return (
     <main
       className={`app-shell concept-hub unified-layout ${adminRoute ? "section-admin" : `section-${section}`} ${activeSearch ? "aggregate-results" : ""} ${railCollapsed ? "rail-collapsed" : ""} ${railDrawerOpen ? "rail-drawer-open" : ""} ${railDrawerOpen || railDrawerVisible ? "rail-drawer-visible" : ""} ${!railDrawerOpen && railDrawerVisible ? "rail-drawer-closing" : ""} ${section === "notes" ? "notes-section" : ""}`}
@@ -6980,9 +6971,9 @@ export default function Home() {
               </p>
               <div className="library-heading-main">
                 <div className="library-heading-copy">
-                  <div className={`library-heading-title${currentFolder ? " has-parent" : ""}`}>
+                  <div className={`library-heading-title${currentFolder ? " has-parent" : ""}${section === "offline" ? ` max-[760px]:!grid ${currentFolder ? "max-[760px]:!grid-cols-[auto_minmax(0,1fr)_auto]" : "max-[760px]:!grid-cols-[minmax(0,1fr)_auto]"}` : ""}`}>
                 {currentFolder && <button className="mobile-parent-link" type="button" aria-label={`Back to ${currentFolder.split("/").slice(-2,-1)[0] || "Libraries"}`} onClick={() => { const parent = currentFolder.split("/").slice(0,-1).join("/") || null; restoreFolderBrowsePrefs(parent); setCurrentFolder(parent); }}><MenuIcon name="chevronLeft" /></button>}
-                <h1>
+                <h1 className={section === "offline" ? `max-[760px]:!row-start-1 max-[760px]:!min-w-0 ${currentFolder ? "max-[760px]:!col-start-2" : "max-[760px]:!col-start-1"}` : undefined}>
                   <span>
                   {activeSearch.trim()
                     ? `Results for “${activeSearch.trim()}”`
@@ -7003,6 +6994,11 @@ export default function Home() {
                     </span>
                   )}
                 </h1>
+                {section === "offline" && (
+                  <div className={`ml-auto shrink-0 max-[760px]:!row-start-1 max-[760px]:!justify-self-end ${currentFolder ? "max-[760px]:!col-start-3" : "max-[760px]:!col-start-2"}`}>
+                    {libraryViewControls}
+                  </div>
+                )}
               {section === "library" && currentFolder && (canCreateFolderHere || canUploadHere || canServerDownloadHere) && (
                 <div className="folder-tools">
                   <button type="button" aria-label="Add media" aria-expanded={folderToolsOpen} aria-controls="folder-tools-menu" onClick={() => setFolderToolsOpen(!folderToolsOpen)}><MenuIcon name="plus" /><span className="folder-tools-label">Add media</span></button>
@@ -7051,44 +7047,19 @@ export default function Home() {
                   <button type="button" aria-label="Play all recent media" onClick={() => playVisibleQueue(false)}><MenuIcon name="play" /></button>
                   <button type="button" aria-label="Shuffle recent media" onClick={() => playVisibleQueue(true)}><MenuIcon name="shuffle" /></button>
                 </div>}
-                {section === "offline" && (
-                  <div className="library-settings">
-                    <button
-                      type="button"
-                      onClick={() => void chooseOfflineDownloadLocation()}
-                      disabled={offlineBusy}
-                    >
-                      {offlineBusy ? "Choosing…" : offlineLocationName ? "Change offline folder" : "Choose offline folder"}
-                    </button>
-                    {!Capacitor.isNativePlatform() && (offlineLocationName || offlineBundles.length > 0) && (
-                      <button type="button" onClick={() => void reconnectOfflineDownloadFolders()} disabled={offlineBusy}
-                        title="If your browser offers Allow on every visit, choose it to remember folder access.">
-                        Reconnect offline folders
-                      </button>
-                    )}
-                    {offlineBundles.some((bundle) => bundle.kind === "folder") && (
-                      <button type="button" onClick={() => void syncOfflineFolders()} disabled={offlineBusy || backendState !== "online"}>
-                        Sync offline folders
-                      </button>
-                    )}
-                    {offlineSyncError && <small role="status">{offlineSyncError} Use Sync offline folders to retry.</small>}
-                    {backendState === "offline" && (
-                      <button type="button" onClick={() => void openConfiguredTmsServer()}>
-                        Try server
-                      </button>
-                    )}
+                {section === "offline" && backendState === "offline" && (
+                  <div className="library-settings max-[760px]:!col-span-full max-[760px]:!row-start-2">
+                    <button type="button" onClick={() => void openConfiguredTmsServer()}>Try server</button>
                   </div>
                 )}
                   {/* The connection badge owns loading/offline state; the count appears once connected. */}
-                  {(isPlaylistOverview || section === "notes" || section === "offline" || section === "discover" || backendState === "online") && (
+                  {section !== "offline" && (isPlaylistOverview || section === "notes" || section === "discover" || backendState === "online") && (
                   <span className="library-status">
-                {!isPlaylistOverview && isFetchingNewFolder && section !== "notes" && section !== "offline" && section !== "discover" && (
+                {!isPlaylistOverview && isFetchingNewFolder && section !== "notes" && section !== "discover" && (
                   <i className="library-loading-spinner" aria-hidden="true" />
                 )}
                 {isPlaylistOverview
                   ? `${filteredPlaylistCards.length}${filteredPlaylistCards.length !== sidebarPlaylists.length ? ` of ${sidebarPlaylists.length}` : ""} playlist${sidebarPlaylists.length === 1 ? "" : "s"}`
-                  : section === "offline"
-                  ? `${visible.length} items${offlineLocationName ? ` · ${offlineLocationName}` : ""}${backendState === "offline" ? " · Server offline" : ""}`
                   : section === "notes"
                   ? sharedTodoSyncState === "saving"
                     ? "Saving notes…"
@@ -7124,31 +7095,29 @@ export default function Home() {
           </div>
 
           {!isPlaylistOverview && section !== "notes" && section !== "discover" && (
-          <div className="browse-controls">
+          <div className={`browse-controls${section === "offline" && !selectionMode ? " !grid !grid-cols-[auto_minmax(0,1fr)] !items-center !gap-2" : ""}`}>
                 {!isPlaylistOverview && section !== "notes" && section !== "discover" && (section === "offline" || section === "playlists" ? visible.length > 0 && filterTags.length > 1 : currentLibraryType !== "movies_tv" && !activeSearch.trim() && filterTags.length > 1) && (
-                  <div className="tag-strip">
+                  <div className={`tag-strip${section === "offline" && !selectionMode ? " !col-start-2 !row-start-1 !w-max !max-w-full !min-w-0 !justify-self-end !flex-nowrap !overflow-x-auto !m-0 !p-0 ![mask-image:none]" : ""}`}>
                     <span>Filter by</span>
                     {filterTags.map((item) => (
                       <button
                         key={item}
-                        data-label={item}
-                        className={item === "All" ? activeTags.length === 0 ? "active" : "" : activeTags.includes(item) ? "active" : ""}
+                        data-label={item === FAVORITES_FILTER ? "" : item}
+                        className={`${item === FAVORITES_FILTER ? "tag-favorite " : ""}${item === "All" ? activeTags.length === 0 ? "active" : "" : activeTags.includes(item) ? "active" : ""}`}
                         aria-pressed={item === "All" ? activeTags.length === 0 : activeTags.includes(item)}
+                        aria-label={item === FAVORITES_FILTER ? "Favorites" : undefined}
+                        title={item === FAVORITES_FILTER ? "Favorites" : undefined}
                         onClick={() => setActiveTags((current) => item === "All" || current[0] === item ? [] : [item])}
                       >
-                        <span>{item === "Video" ? "Videos" : item === "Photos" ? "Images" : item === "File" ? "Files" : item}</span>
+                        {item === FAVORITES_FILTER ? <MenuIcon name="star" /> : <span>{item === "Video" ? "Videos" : item === "Photos" ? "Images" : item === "File" ? "Files" : item}</span>}
                       </button>
                     ))}
                   </div>
                 )}
-          <div className="toolbar">
-            <div>
-              {!activeSearch.trim() && (section === "playlists" || (section === "offline" && currentFolder)) && <span>
-                {section === "playlists"
-                  ? "Playlist items"
-                  : section === "offline"
-                    ? currentFolder ? "Folder content" : "Offline library"
-                  : null}
+          <div className={`toolbar${section === "offline" && !selectionMode ? " !contents" : ""}`}>
+            <div className={section === "offline" && !selectionMode ? "!col-start-1 !row-start-1 !flex-nowrap" : undefined}>
+              {!activeSearch.trim() && section === "playlists" && <span>
+                Playlist items
               </span>}
               {selectionMode ? (
                 <>
@@ -7270,7 +7239,7 @@ export default function Home() {
                 </>
               )}
             </div>
-            <div className="view-tools">
+            <div className={`view-tools${section === "offline" && !selectionMode ? " !col-span-full !row-start-2" : ""}`}>
               {section === "playlists" && Object.keys(playlists).length > 0 && (
                 <>
                   <button type="button" onClick={openPlaylistOverview}>All playlists</button>
@@ -7329,27 +7298,8 @@ export default function Home() {
               {visible.length > 0 && <>{section !== "recent" && section !== "trash" && section !== "new" && !(visible.length <= 2 && visible.every(item => item.kind === "folder")) && <select aria-label="Sort files" value={`${sort}:${sortDirection}`} onChange={event => { const [field, direction] = event.target.value.split(":"); setSort(field as SortField); setSortDirection(direction as SortDirection); }}>
                 {([['opened','Recently opened','Least recently opened'],['date','Newest added','Oldest added'],['name','Name A–Z','Name Z–A'],['size','Largest','Smallest'],['length','Longest','Shortest'],['type','File type A–Z','File type Z–A']] as const).flatMap(([field,first,second]) => { const natural = field === 'name' || field === 'type' ? 'asc' : 'desc'; return (['asc','desc'] as const).map(direction => <option key={`${field}:${direction}`} value={`${field}:${direction}`}>{direction === natural ? first : second}</option>); })}
               </select>}
-              {(section === "offline" || ((currentLibraryType === "mixed" || currentLibraryType === "music") && (currentFolder || activeSearch.trim() || query.trim()))) ? (
-                <div className="view-toggle" role="group" aria-label="Library view">
-                  <button
-                    type="button"
-                    className={libraryView === "grid" ? "active" : ""}
-                    aria-pressed={libraryView === "grid"}
-                    aria-label="Grid view"
-                    onClick={() => selectLibraryView("grid")}
-                  >
-                    <MenuIcon name="grid" /><span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>Grid view</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={libraryView === "list" ? "active" : ""}
-                    aria-pressed={libraryView === "list"}
-                    aria-label="List view"
-                    onClick={() => selectLibraryView("list")}
-                  >
-                    <MenuIcon name="list" /><span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>List view</span>
-                  </button>
-                </div>
+              {(section !== "offline" && (currentLibraryType === "mixed" || currentLibraryType === "music") && (currentFolder || activeSearch.trim() || query.trim())) ? (
+                libraryViewControls
               ) : null}</>}
             </div>
           </div>
@@ -9462,7 +9412,7 @@ export default function Home() {
               setSettingsOpen(false);
           }}
         >
-          <div className="folder-create-modal profile-settings-modal settings-dialog" role="dialog" aria-modal="true" aria-labelledby="profile-settings-title">
+          <div className="folder-create-modal profile-settings-modal settings-dialog m-0! w-[min(820px,calc(100vw-32px))]! h-[min(760px,calc(100dvh-48px))]! p-0! max-sm:w-[calc(100vw-16px)]! max-sm:h-[calc(100dvh-24px)]!" role="dialog" aria-modal="true" aria-labelledby="profile-settings-title">
             <div className="profile-settings-header">
               <h2 id="profile-settings-title">Settings</h2>
               <button type="button" aria-label="Close settings" onClick={() => setSettingsOpen(false)}><MenuIcon name="close" /></button>
@@ -9509,6 +9459,13 @@ export default function Home() {
                     ? `Downloads on this device are saved in ${offlineLocationName}.`
                     : "Choose where offline copies are saved on this device."}
                 </small>
+                {!Capacitor.isNativePlatform() && (offlineLocationName || offlineBundles.length > 0) && (
+                  <button type="button" onClick={() => void reconnectOfflineDownloadFolders()} disabled={offlineBusy}
+                    title="If your browser offers Allow on every visit, choose it to remember folder access.">
+                    Reconnect offline folders
+                  </button>
+                )}
+                {offlineSyncError && <small role="status">{offlineSyncError} Automatic sync will retry when the server is available.</small>}
               </div>
               <label className="profile-device-path-option">
                 <input

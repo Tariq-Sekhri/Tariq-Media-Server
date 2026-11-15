@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import "./tailwind.css";
 import "./unified.css";
 import "./watch-player-controls.css";
 import ModalIsolation from "./ModalIsolation";

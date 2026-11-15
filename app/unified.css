@@ -5765,7 +5765,7 @@
 @media (max-width: 760px) {
   .mobile-navigation > a,.mobile-navigation > button { font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1.25; }
   .unified-layout .tag-strip > span { display: none; }
-  .unified-layout .tag-strip button { min-height: 48px; font-size: 13px; }
+  .unified-layout .tag-strip button { min-height: 36px; font-size: 13px; }
   .unified-layout .rich-notes-toolbar .toolbar-btn { min-width: 48px; min-height: 48px; }
   .unified-layout .rich-notes-toolbar .toolbar-select { min-height: 48px; font-size: 14px; }
   .unified-layout .rich-notes-container [contenteditable] { font-size: 16px; }
@@ -5854,7 +5854,7 @@
 /* One chip style for library filters, matching Discover's type tabs. */
 .unified-layout .tag-strip button { place-items: center; align-content: center; min-height: 44px; padding: 0 16px; border: 1px solid #333b45; border-radius: 10px; background: #161b21; color: #d9dde3; font-size: 14px; }
 .unified-layout .tag-strip button.active { background: #473968; border-color: #9b82df; color: #fff; }
-@media (max-width: 760px) { .unified-layout .tag-strip button { min-height: 44px; height: 44px; font-size: 14px; } }
+@media (max-width: 760px) { .unified-layout .tag-strip button { min-height: 36px; height: 36px; padding: 0 12px; font-size: 14px; } }
 /* Placeholder folder art stays in the dark theme. */
 .unified-layout .thumb.lavender:has(> .folder-shape) { background: linear-gradient(145deg, #2a2440, #1a1c26); }
 /* Phone bottom bar: all destinations in one scrollable row (replaces More). */
@@ -5940,7 +5940,7 @@
   .unified-layout .rich-notes-toolbar .toolbar-btn:focus:not(:focus-visible) { outline: none; box-shadow: none; }
   .unified-layout .empty-state { min-height: calc(100dvh - 320px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 28px 20px; }
   .unified-layout .empty-state :is(h2,p) { margin: 0; }
-  .unified-layout .tag-strip button { min-height: 48px; height: 48px; }
+  .unified-layout .tag-strip button { min-height: 36px; height: 36px; }
   .unified-layout .view-tools select { color: #c5ccd3; font-size: 14px; }
   .unified-layout .hub-folder-rail :is(button,select),.unified-layout .sidebar-collection-inline-sort { min-height: 48px; min-width: 48px; }
   .unified-layout .folder-count,.unified-layout .library-type,.unified-layout .sidebar-collection-count { font-size: 13px; color: #a8b0b9; }
@@ -7508,3 +7508,23 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
   .admin-user-storage small { min-width: 0; text-align: left; }
   .admin-user-storage progress { grid-column: auto; flex: 0 1 120px; min-width: 48px; width: 120px; margin-top: 0; }
 }
+/* Favorites filter chip shows a star instead of text. */
+.unified-layout .tag-strip button.tag-favorite .menu-icon { margin: 0; width: 16px; height: 16px; flex: 0 0 16px; vertical-align: middle; }
+.unified-layout .tag-strip button.tag-favorite.active .menu-icon { fill: currentColor; }
+/* Phone browse controls: Select | sort | view style on one row, tags below. */
+@media (max-width: 760px) {
+ .unified-layout .browse-controls > .toolbar { order: 1; }
+ .unified-layout .browse-controls > .tag-strip { order: 2; }
+ .unified-layout .toolbar:not(:has(.toolbar-selection-count)) { flex-wrap: nowrap; }
+ .unified-layout .toolbar:not(:has(.toolbar-selection-count)) .view-tools { flex: 1 1 0; width: auto; min-width: 0; }
+}
+/* Icons that stand alone in a button or badge have no label beside them, so
+   drop the menu-icon label gap that would push them off centre. */
+.empty-state > span:first-child .menu-icon,
+.folder-tree-expand .menu-icon,
+.search-submit .menu-icon,
+.search-icon .menu-icon,
+.search-suggestions .suggestion-row i .menu-icon,
+.mobile-parent-link .menu-icon,
+.search-result-actions button .menu-icon,
+.rich-notes-toolbar .toolbar-btn .menu-icon { margin: 0; }

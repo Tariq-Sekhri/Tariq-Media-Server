@@ -57,10 +57,8 @@ const OFFLINE_DIFFERENCES = [
   { file: 'app/page.tsx', match: ': backendState === "offline"', exact: true, count: 1, reason: 'Shows the server error for empty server sections.' },
   // Connection badge and Offline tools.
   { file: 'app/page.tsx', match: '{backendState === "online" ? <><path', count: 1, reason: 'Connection badge icon.' },
-  { file: 'app/page.tsx', match: 'onClick={() => void syncOfflineFolders()} disabled={offlineBusy || backendState !== "online"}>', count: 1, reason: 'Syncing downloads needs the server.' },
-  { file: 'app/page.tsx', match: '{backendState === "offline" && (', count: 1, reason: 'Try server button.' },
+  { file: 'app/page.tsx', match: '{section === "offline" && backendState === "offline" && (', count: 1, reason: 'Try server button.' },
   { file: 'app/page.tsx', match: 'section === "discover" || backendState === "online") && (', count: 1, reason: 'The item count appears once connected; the badge owns other states.' },
-  { file: 'app/page.tsx', match: '${backendState === "offline" ? " · Server offline" : ""}', count: 1, reason: 'Offline status line.' },
   // Downloaded copies: the same menu, with server-only file actions disabled.
   { file: 'app/page.tsx', match: 'const isDownloaded = Boolean(item.offline) || section === "offline";', count: 1, reason: 'Identifies a downloaded copy in the shared item menu.' },
   { file: 'app/page.tsx', match: 'disabled={isDownloaded}', count: 3, reason: 'Home screen shortcuts and server downloads need the server file.' },

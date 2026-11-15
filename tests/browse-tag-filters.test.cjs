@@ -25,14 +25,15 @@ function visit(node) {
   }
   if (ts.isJsxElement(node) && node.openingElement.attributes.properties.some((attribute) =>
     ts.isJsxAttribute(attribute) && attribute.name.getText(page) === 'className'
-      && attribute.initializer?.text === 'tag-strip')) filterStrip = node.getText(page);
+      && /^(\"tag-strip\"|\{`tag-strip\$\{)/.test(attribute.initializer?.getText(page) ?? ''))) filterStrip = node.getText(page);
   ts.forEachChild(node, visit);
 }
 visit(page);
 assert.ok(filterMemo && filterStrip, 'Must find the real page filter logic and button markup');
 const compiled = ts.transpileModule(`
   module.exports = function({ items, filterCatalog = items, currentFolder, activeTags = [] }) {
-    const section = 'library', customTags = {}, FAVORITES_FILTER = 'Favorites';
+    const section = 'library', customTags = {}, FAVORITES_FILTER = 'Favorites', selectionMode = false;
+    const MenuIcon = ({ name }) => React.createElement('svg', { 'data-icon': name });
     const { filters: filterTags } = (${filterMemo})();
     const setActiveTags = () => {};
     return (${filterStrip});
@@ -57,7 +58,8 @@ function buttons(activeTags = []) {
   const html = renderToStaticMarkup(moduleUnderTest.exports({
     items, currentFolder: folder, filterCatalog: [...items, unrelatedImage], activeTags,
   }));
-  const labels = [...html.matchAll(/<button\b[^>]*>[\s\S]*?<span>([^<]+)<\/span>[\s\S]*?<\/button>/g)].map((match) => match[1]);
+  const labels = [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)]
+    .map(([, attributes, body]) => body.match(/<span>([^<]+)<\/span>/)?.[1] ?? attributes.match(/aria-label="([^"]+)"/)?.[1]);
   assert.ok(labels.includes('All') && labels.includes('Favorites'), 'Must inspect rendered filter buttons');
   return labels;
 }

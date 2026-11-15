@@ -1,10 +1,11 @@
 // Synthetic media fixtures for the regression/performance suite. Outputs are
-// bit-exact so an unchanged recipe yields the same bytes (and the same
-// fixtureIdentity) on every run. A manifest in private/ caches each output's
+// reused unchanged when possible, preserving fixtureIdentity across runs.
+// A manifest in private/ caches each output's
 // recipe, inputs, tool identity and SHA-256; an output is reused only when all
 // of those still match the file on disk.
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {accessSync, constants, readFileSync} from 'node:fs';
 import {mkdir, readFile, rename, rm, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -31,9 +32,21 @@ const sha256 = data => createHash('sha256').update(data).digest('hex');
 const fileHash = async file => { try { return sha256(await readFile(file)); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };
 
 export function toolIdentity(ffmpeg) {
-  // Full -version output includes the build configuration and library versions.
-  const text = execFileSync(ffmpeg, ['-version'], {encoding: 'utf8', windowsHide: true});
-  return {version: text.split(/\r?\n/)[0].trim(), sha256: sha256(text)};
+  // Resolve PATH first so the executable we hash is also the one we run.
+  const candidates = path.isAbsolute(ffmpeg) || /[\\/]/.test(ffmpeg)
+    ? [path.resolve(ffmpeg)]
+    : (process.env.PATH || '').split(path.delimiter).flatMap(dir => {
+      const extensions = process.platform === 'win32' && !path.extname(ffmpeg)
+        ? (process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';') : [''];
+      return extensions.map(ext => path.resolve(dir || '.', ffmpeg + ext));
+    });
+  const executable = candidates.find(candidate => {
+    try { accessSync(candidate, constants.X_OK); return true; } catch { return false; }
+  });
+  if (!executable) throw Error(`Cannot find ffmpeg executable: ${ffmpeg}`);
+  // Include the binary and the reported build/library configuration.
+  const text = execFileSync(executable, ['-version'], {encoding: 'utf8', windowsHide: true});
+  return {executable, version: text.split(/\r?\n/)[0].trim(), sha256: sha256(Buffer.concat([readFileSync(executable), Buffer.from(text)]))};
 }
 
 async function readManifest(file) {
@@ -81,7 +94,7 @@ export async function generateMedia({ffmpeg = defaultFfmpeg(), recipes = default
     const partial = `${recipe.output}.partial`;
     try {
       await rm(partial, {force: true});
-      execFileSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', ...recipe.args, partial], {stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true});
+      execFileSync(tool.executable, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', ...recipe.args, partial], {stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true});
       const hash = await fileHash(partial);
       if (!hash) throw Error(`ffmpeg produced no output for ${recipe.output}`);
       await rename(partial, recipe.output);

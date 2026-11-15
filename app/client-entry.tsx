@@ -13,6 +13,7 @@ import AppShell from "./AppShell";
 import AppConfirmProvider from "./AppConfirmProvider";
 import "./globals.css";
 import "./unified.css";
+import "./tailwind.css";
 import "./watch-player-controls.css";
 
 const url = new URL(window.location.href);

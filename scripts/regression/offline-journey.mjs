@@ -16,8 +16,16 @@ async function clickText(text){const r=await c.call('Runtime.evaluate',{expressi
 const decode=s=>s.replaceAll('&amp;','&').replaceAll('&quot;','"').replaceAll('&apos;',"'");
 function tree(){const xml=adb('exec-out','uiautomator','dump','/dev/tty');return [...xml.matchAll(/<node\b[^>]*>/g)].map(m=>Object.fromEntries([...m[0].matchAll(/([\w:-]+)="([^"]*)"/g)].map(a=>[a[1],decode(a[2])])));}
 function tap(nodes,pattern){const node=nodes.find(n=>n.enabled!=='false'&&(pattern.test(n.text||'')||pattern.test(n['content-desc']||'')));if(!node)return false;const b=node.bounds?.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);if(!b)return false;adb('shell','input','tap',String(Math.round((+b[1]+ +b[3])/2)),String(Math.round((+b[2]+ +b[4])/2)));return true;}
+async function openDownloadSettings(){
+  if(!await c.evaluate(`!!document.querySelector('button[aria-label="Close settings"]')`)){
+    await c.evaluate(`document.querySelector('button[aria-label="Account menu"]').click()`);
+    await clickText('Settings');
+  }
+  await clickText('Downloads');
+}
 async function chooseFolder(){
-  await clickText('Choose offline folder');
+  await openDownloadSettings();
+  await clickText('Choose folder');
   let chosen=false;
   for(let i=0;i<8&&!chosen;i++){
     const nodes=tree();
@@ -38,6 +46,7 @@ async function chooseFolder(){
   assert.ok(chosen,'Could not select the owned offline fixture folder');
   await pause(200);tap(tree(),/^Allow$/i);
   await wait(`document.body.innerText.includes('TMSRegression')`);
+  await c.evaluate(`document.querySelector('button[aria-label="Close settings"]').click()`);
 }
 async function nativeList(){return c.evaluate(`Capacitor.nativePromise('TmsOffline','list',{ownerId:1})`);}
 async function record(id,description,run){await run();results.push({id,description,status:'pass'});console.log(JSON.stringify(results.at(-1)));}
@@ -64,7 +73,8 @@ try {
     const location=await c.evaluate(`Capacitor.nativePromise('TmsOffline','getLocation',{})`);
     assert.deepEqual(location,{configured:false,name:''},'An ungranted folder must not count as chosen');
     assert.equal((await nativeList()).locationName,'','An ungranted folder must not be named as the download location');
-    await wait(`[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Choose offline folder'&&e.getBoundingClientRect().height>0)`);
+    await openDownloadSettings();
+    await wait(`[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Choose folder'&&e.getBoundingClientRect().height>0)`);
     assert.equal(await c.evaluate(`document.body.innerText.includes('TMSRegression')`),false,'The ungranted folder name must not be shown');
   });
   await chooseFolder();
