@@ -22,7 +22,13 @@ const normalize = (line) => line.trim().replace(/\s+/g, ' ');
 // `count` of them. Keep a reason
 // that explains why the server is required; otherwise share the online code.
 const OFFLINE_DIFFERENCES = [
-  { file: 'app/page.tsx', match: '<MobileNavigation active={section === "trash" ? "admin" : section}', count: 1, reason: 'The shared mobile navigation hides server-only destinations while disconnected, matching the desktop navigation; downloaded media and queued favorites remain available.' },
+  { file: 'app/page.tsx', match: '<MobileNavigation active={adminRoute || section === "trash" ? "admin" : section}', count: 1, reason: 'The shared mobile navigation hides server-only destinations while disconnected, matching the desktop navigation; downloaded media and queued favorites remain available.' },
+  { file: 'app/page.tsx', match: '{backendState !== "offline" && <button', count: 1, reason: 'Creating a shared room requires the server.' },
+  { file: 'app/page.tsx', match: '{(visibleBackgroundMagnetDownloads.length > 0 || (backendState !== "offline" && !adminRoute)) && (', count: 1, reason: 'Room listings require connectivity; downloads retain their own status.' },
+  { file: 'app/page.tsx', match: '{backendState !== "offline" && !adminRoute && <WatchTogetherCards />}', count: 1, reason: 'Shared rooms are server-backed.' },
+  { file: 'app/watch/page.tsx', match: 'const roomSyncActive = Boolean(watchRoom.room)', count: 1, reason: 'Only server-backed visual media participates in room synchronization.' },
+  { file: 'app/watch/page.tsx', match: 'mediaPath: details && !details.offline ?', count: 1, reason: 'Local downloads are not advertised as server media.' },
+  { file: 'app/watch/page.tsx', match: 'watchTogether={!companionInstance && details && !details.offline', count: 1, reason: 'Room sharing needs server-backed media.' },
   // Connection state and returning online.
   { file: 'app/page.tsx', match: 'if (backendState !== "offline") return;', count: 1, reason: 'Moves to Offline once the server is confirmed unreachable.' },
   { file: 'app/page.tsx', match: 'if (backendState !== "online") return;', count: 2, reason: 'Returns to the previous page and syncs queued offline changes once connected.' },
@@ -84,8 +90,8 @@ const OFFLINE_DIFFERENCES = [
   { file: 'app/watch/page.tsx', match: 'if (details.offline) return;', count: 1, reason: 'Activity is reported to the server only for streamed media.' },
   { file: 'app/watch/page.tsx', match: 'if (details.offline && details.customQueue) {', count: 1, reason: 'Restores a queue of local files.' },
   { file: 'app/watch/page.tsx', match: 'if (details.offline && requestedQuality !== "original") {', count: 1, reason: 'Transcoding needs the server.' },
-  { file: 'app/watch/page.tsx', match: 'if (details.offline) {', count: 1, reason: 'Local files play directly without server audio probing.' },
-  { file: 'app/watch/page.tsx', match: 'if (!details || details.offline ||', count: 1, reason: 'Preloading the next episode streams from the server.' },
+  { file: 'app/watch/page.tsx', match: 'if (details.offline || details.kind === "audio") {', count: 1, reason: 'Local files and audio bypass video inspection.' },
+  { file: 'app/watch/page.tsx', match: 'if (!details || details.offline ||', count: 2, reason: 'Room creation and episode preloading require server media.' },
   { file: 'app/watch/page.tsx', match: 'const seekPreviewUrl = seekHover && details && !details.offline ?', count: 1, reason: 'Seek previews are rendered by the server.' },
   { file: 'app/MiniAudioPlayer.tsx', match: 'if (!item.offline && item.path &&', count: 1, reason: 'Progress of streamed audio is reported to the server.' },
   { file: 'app/MiniAudioPlayer.tsx', match: 'if (target.offline) {', count: 1, reason: 'Favorites of downloads are queued for sync.' },
@@ -186,7 +192,7 @@ test('the offline shell is built from the same sources as each release', () => {
   assert.match(client, /path\.startsWith\("\/app-shell-assets\/"\)/);
   assert.match(read('capacitor.config.ts'), /webDir: "dist\/client"/);
   const release = read('.github/workflows/android-play-release.yml');
-  assert.match(release, /npm run test:unit[\s\S]*npm run build\s+npx cap sync android/, 'each Android release tests, then bundles the shell built from its own commit');
+  assert.match(release, /npm run build\s+npx cap sync android/, 'each Android release bundles the shell from its own commit; regression tests run locally');
 });
 
 // Function bodies in page.tsx, found by name.

@@ -165,6 +165,7 @@ test('production Play all starts immediately and leaves player selection to the 
   let selected;
   const start = pageFunction('app/page.tsx', 'playVisibleQueue', {
     playableVisible: [item('first', { kind: 'audio' }), item('second')], section: 'library',
+    frozenOpenedOrder: null, queueOrderViewKey: 'test-view', opened: {}, visible: [], setQueueOrderSnapshot() {},
     currentQueueSource: method => source({ method }), isServerPagedFolder: true, serverHasMore: true, serverTotal: 1000,
     ...q, playVideo: (...args) => { selected = args; },
     authFetch: () => { throw new Error('must not wait for inventory'); },

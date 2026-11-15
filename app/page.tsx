@@ -27,6 +27,7 @@ import { mainNavigation } from "./lib/navigation";
 import ImageDurationControl from "./ImageDurationControl";
 import MagnetDownloader from "./MagnetDownloader";
 import ServerDownloadDialog, { type YtDlpJob } from "./ServerDownloadDialog";
+import { startEmptyWatchRoom, WatchTogetherCards } from "./WatchTogether";
 import TagInput from "./TagInput";
 import { usePlaybackSession } from "./PlaybackProvider";
 import { navigateApp, syncAppShell, useAppShell } from "./lib/app-shell";
@@ -36,7 +37,7 @@ import { startPlaybackSession, playbackSessionSnapshot, setPlaybackSession } fro
 import { hydrateNativeWatchProgress } from "./lib/native-watch-progress";
 import { mergeWatchProgress, readLocalWatchProgress, savesWatchProgress, syncLocalWatchProgress, writeLocalWatchProgress } from "./lib/watch-progress";
 import RichTextEditor from "./RichTextEditor";
-import { authorizeOfflineSync, chooseOfflineLocation, clearPendingOfflineFavorite, clearPendingOfflineOrganization, hydratePendingOfflineChanges, listOfflineBundles, makeAvailableOffline, offlineLocation, openConfiguredTmsServer, openOfflineFile, pendingOfflineFavoriteOverrides, queueOfflineFavorite, queueOfflineOrganization, queueOfflinePlaylistCreate, queueOfflinePlaylistDelete, queueOfflineTagCreate, queueOfflineTagDelete, readOfflineUserState, readPendingOfflineChanges, reconcileOfflineBundle, removeOfflineBundle, resolveOfflineFileUrl, retryOfflineBundle, saveOfflineUserState, syncPendingOfflineOrganization, type OfflineBundle, type OfflineFile } from "./lib/offline";
+import { authorizeOfflineSync, chooseOfflineLocation, clearPendingOfflineFavorite, clearPendingOfflineOrganization, hydratePendingOfflineChanges, listOfflineBundles, makeAvailableOffline, offlineLocation, openConfiguredTmsServer, openOfflineFile, pendingOfflineFavoriteOverrides, queueOfflineFavorite, queueOfflineOrganization, queueOfflinePlaylistCreate, queueOfflinePlaylistDelete, queueOfflineTagCreate, queueOfflineTagDelete, readOfflineUserState, readPendingOfflineChanges, reconnectOfflineFolders, reconcileOfflineBundle, removeOfflineBundle, resolveOfflineFileUrl, retryOfflineBundle, saveOfflineUserState, syncPendingOfflineOrganization, type OfflineBundle, type OfflineFile } from "./lib/offline";
 import { applyPendingOrganization, emptyPendingChanges, isOfflinePlaylistId, type PendingOrganization } from "./lib/offline-organization";
 import { buildOfflineAllMediaItems, buildOfflineBrowseItems, findOfflineBundleForFolder, offlineArtworkKey, offlineFolderFromLocation, offlineLocationFromFolder, offlinePlaybackKey } from "./lib/offline-browse";
 import { addNativeHomeScreenShortcut } from "./lib/native-shortcuts";
@@ -2860,6 +2861,13 @@ export default function Home() {
       favorite: Boolean(item.path && favorites.has(item.path)),
     }));
   }, [recursiveFavorites, items, sidebarTreeEntries, currentFolder, favoritePaths, lastAccessed, playback, customTags]);
+  // Starting Shuffle or Play all records access and playback progress, which
+  // would re-sort a "Last opened" list under the user. Keep the order they
+  // clicked from until they leave this view.
+  const queueOrderViewKey = JSON.stringify([section, currentFolder, activePlaylistId, activeTags, query, activeSearch, sort, sortDirection]);
+  const [queueOrderSnapshot, setQueueOrderSnapshot] = useState<{ view: string; opened: Record<string, number> } | null>(null);
+  const frozenOpenedOrder = queueOrderSnapshot?.view === queueOrderViewKey ? queueOrderSnapshot.opened : null;
+  if (queueOrderSnapshot && queueOrderSnapshot.view !== queueOrderViewKey) setQueueOrderSnapshot(null);
   const visible = useMemo(() => {
     let next: MediaItem[];
     if (section === "recent") next = items.filter((item) => !item.trashed && item.kind !== "folder" && item.lastOpenedAt);
@@ -2915,6 +2923,7 @@ export default function Home() {
     const direction = effectiveDirection === "asc" ? 1 : -1;
     const currentParts = currentFolder?.split("/") ?? [];
     const currentIsShow = section === "library" && currentParts.length > 1 && libraries[currentParts[0]]?.content_type === "movies_tv" && mediaEvidenceForFolder(items, currentFolder!).kind === "series";
+    const openedAt = (item: MediaItem) => (item.path ? frozenOpenedOrder?.[item.path] : undefined) ?? item.lastOpenedAt ?? item.addedAt ?? 0;
     next = [...next].sort((a, b) => {
       if (currentIsShow && a.kind === "folder" && b.kind === "folder") {
         const aPath = a.parent ? `${a.parent}/${a.name}` : a.name;
@@ -2931,14 +2940,14 @@ export default function Home() {
             // "Last opened" falls back to when an item was added for media
             // this user has never opened. This keeps one chronological order
             // instead of forcing every unopened item to the bottom.
-            : effectiveSort === "opened" ? (a.lastOpenedAt ?? a.addedAt ?? 0) - (b.lastOpenedAt ?? b.addedAt ?? 0)
+            : effectiveSort === "opened" ? openedAt(a) - openedAt(b)
               : (a.addedAt ?? 0) - (b.addedAt ?? 0);
       // Offline files in one bundle share a download timestamp. Give equal
       // values a stable order so either direction still changes their order.
       return (comparison || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }) || (a.path ?? "").localeCompare(b.path ?? "")) * direction;
     });
     return next;
-  }, [activePlaylistId, activeSearch, activeTags, currentFolder, favoriteBrowseItems, isServerPagedFolder, items, libraries, offlineAllMediaItems, offlineBrowseItems, playlistSourceItems, playlists, playlistsOffline, query, section, serverHasMore, sessionUser?.is_admin, sessionUser?.name, sort, sortDirection, trashItems]);
+  }, [activePlaylistId, activeSearch, activeTags, currentFolder, favoriteBrowseItems, isServerPagedFolder, items, libraries, offlineAllMediaItems, offlineBrowseItems, playlistSourceItems, playlists, playlistsOffline, query, section, serverHasMore, sessionUser?.is_admin, sessionUser?.name, sort, sortDirection, trashItems, frozenOpenedOrder]);
   const currentLibraryPath = currentFolder?.split("/")[0] ?? null;
   const currentLibrary = currentLibraryPath ? libraries[currentLibraryPath] ?? defaultLibraryConfig() : null;
   const currentLibraryType = currentLibrary?.content_type ?? "mixed";
@@ -3700,6 +3709,10 @@ export default function Home() {
   const playVisibleQueue = (shuffle: boolean) => {
     if (!playableVisible.length) return flash("No playable media in this view");
     const trace = beginPlaybackTrace({ trigger: shuffle ? "shuffle" : "play_all" });
+    if (!frozenOpenedOrder) setQueueOrderSnapshot({
+      view: queueOrderViewKey,
+      opened: Object.fromEntries(visible.flatMap((item) => item.path ? [[item.path, item.lastOpenedAt ?? item.addedAt ?? 0]] : [])),
+    });
     if (section === "offline") {
       const queue = shuffle ? shuffleMedia(playableVisible) : [...playableVisible];
       playVideo(queue[0], undefined, queue, shuffle ? "Shuffled" : "Play all", undefined, undefined, trace);
@@ -4434,6 +4447,21 @@ export default function Home() {
     const timer = window.setTimeout(() => setOfflineCatalogSyncTick((value) => value + 1), 60_000);
     return () => window.clearTimeout(timer);
   }, [backendState, offlineCatalogSyncTick, sessionUser?.id]);
+  const reconnectOfflineDownloadFolders = async () => {
+    if (offlineBusy) return;
+    setOfflineBusy(true);
+    try {
+      await reconnectOfflineFolders();
+      setOfflineSyncError("");
+      await refreshOfflineDownloads();
+      setOfflineCatalogSyncTick((value) => value + 1);
+      flash("Offline folder access restored");
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Could not reconnect offline folders");
+    } finally {
+      setOfflineBusy(false);
+    }
+  };
   const syncOfflineFolders = async () => {
     if (offlineBusy) return;
     setOfflineBusy(true);
@@ -6596,6 +6624,17 @@ export default function Home() {
                     </button>
                   </a>
                 )}
+                {backendState !== "offline" && <button
+                  type="button"
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    void startEmptyWatchRoom().catch((error: unknown) => {
+                      void appConfirm({ title: "Could not start a room", description: error instanceof Error ? error.message : "Try again in a moment.", action: "OK" });
+                    });
+                  }}
+                >
+                  Start watch room
+                </button>}
                 <button
                   type="button"
                   onClick={() => {
@@ -7021,6 +7060,12 @@ export default function Home() {
                     >
                       {offlineBusy ? "Choosing…" : offlineLocationName ? "Change offline folder" : "Choose offline folder"}
                     </button>
+                    {!Capacitor.isNativePlatform() && (offlineLocationName || offlineBundles.length > 0) && (
+                      <button type="button" onClick={() => void reconnectOfflineDownloadFolders()} disabled={offlineBusy}
+                        title="If your browser offers Allow on every visit, choose it to remember folder access.">
+                        Reconnect offline folders
+                      </button>
+                    )}
                     {offlineBundles.some((bundle) => bundle.kind === "folder") && (
                       <button type="button" onClick={() => void syncOfflineFolders()} disabled={offlineBusy || backendState !== "online"}>
                         Sync offline folders
@@ -9064,12 +9109,13 @@ export default function Home() {
           onClose={() => setDownloadModalHash(null)}
         />
       )}
-      {visibleBackgroundMagnetDownloads.length > 0 && (
+      {(visibleBackgroundMagnetDownloads.length > 0 || (backendState !== "offline" && !adminRoute)) && (
         <aside
           className="magnet-background-downloads"
           aria-live="polite"
-          aria-label="Active downloads"
+          aria-label="Active downloads and watch rooms"
         >
+          {backendState !== "offline" && !adminRoute && <WatchTogetherCards />}
           {visibleBackgroundMagnetDownloads.length > MAGNET_GROUP_AFTER && (() => {
             const group = visibleBackgroundMagnetDownloads;
             const summary = magnetGroupSummary(group);

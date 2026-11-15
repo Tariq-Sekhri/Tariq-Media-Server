@@ -133,7 +133,13 @@ export const clearNativeMediaSession = async () => {
   if (!nativePlatform || !active) return;
   active = false;
   handlersRef.current = null;
-  await MediaSession.setPlaybackState({ playbackState: "none" });
-  await Promise.all([...registeredActions].map((action) => removeAction(action as MediaSessionAction)));
+  // Forget the registrations and send every native teardown call before
+  // awaiting anything. A player that mounts meanwhile must re-register its
+  // handlers, and its calls must reach the plugin after these removals.
+  const actions = [...registeredActions] as MediaSessionAction[];
   registeredActions.clear();
+  await Promise.all([
+    MediaSession.setPlaybackState({ playbackState: "none" }),
+    ...actions.map((action) => removeAction(action)),
+  ]);
 };

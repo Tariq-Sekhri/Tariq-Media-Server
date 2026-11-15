@@ -1,0 +1,8 @@
+{
+  "attempts": 5,
+  "scenarios": [
+    {"id":"R01-audio-item","budget":"audio-warm","kind":"audio","prepareUrl":"http://127.0.0.1:3100/?folder=Music","clickSelector":"a.card-label-link[href*=\"Afterglow.mp3\"]","resultSelector":".miniplayer audio","sourceIncludes":"Afterglow.mp3","cacheMode":"warm","verifyAudioSamples":true},
+    {"id":"R11-direct-video","budget":"direct-video","kind":"video","prepareUrl":"http://127.0.0.1:3100/?folder=Movies%20and%20Shows%2FOrbital%20Drift%2FSeason%201","clickSelector":"a.card-label-link[href*=\"S01E01\"]","shadowHostSelector":".watch-video-engine > div","resultSelector":"video[src]","displaySelector":".watch-video-canvas","sourceIncludes":"S01E01","cacheMode":"warm","verifyPixels":true},
+    {"id":"R36-visible-image","budget":"image-cold","kind":"image","prepareUrl":"http://127.0.0.1:3100/?folder=Family%20Photos%2FBeach%20Trip%202024","clickSelector":"a.card-label-link[href*=\"IMG_0001\"]","resultSelector":"img.watch-image","sourceIncludes":"IMG_0001","cacheMode":"cold","verifyPixels":true}
+  ]
+}

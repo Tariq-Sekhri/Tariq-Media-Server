@@ -39,7 +39,7 @@ public class OfflineContentTest {
 
     @Test public void deletedTreeProviderRuntimeExceptionDoesNotCrash() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        Uri content = Uri.parse("content://ca.sekhrit.tms.test.deleted-tree/cover.jpg");
+        Uri content = Uri.parse("content://" + context.getPackageName() + ".test.deleted-tree/cover.jpg");
         assertNull(new AndroidProtocolHandler(context).openContentUrl(webUrl(content)));
     }
 }

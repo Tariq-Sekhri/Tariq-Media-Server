@@ -49,7 +49,9 @@ public class TmsWebViewClient extends BridgeWebViewClient {
         String path = request.getUrl().getPath();
         String server = tmsBridge.getServerUrl();
         boolean appOrigin = server != null && android.net.Uri.parse(server).getAuthority().equals(request.getUrl().getAuthority());
-        boolean localOrigin = request.getUrl().getHost().equals(tmsBridge.getHost());
+        String host = request.getUrl().getHost();
+        boolean localOrigin = host != null && host.equals(tmsBridge.getHost());
+        if (path == null) return super.shouldInterceptRequest(view, request);
         if (!appOrigin && !localOrigin) return super.shouldInterceptRequest(view, request);
         try {
             if (path.startsWith("/app-shell-assets/")) {

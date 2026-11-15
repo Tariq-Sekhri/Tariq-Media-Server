@@ -85,7 +85,7 @@ public class TmsOfflinePlugin extends Plugin {
         // A backup restore brings back the saved folder URI but not its
         // permission grant, so only a still-granted folder counts as chosen.
         result.put("configured", hasTreePermission(uri));
-        result.put("name", preferences().getString(TREE_NAME, ""));
+        result.put("name", grantedTreeName(uri));
         call.resolve(result);
     }
 
@@ -208,7 +208,7 @@ public class TmsOfflinePlugin extends Plugin {
             if (changed) writeManifest(stored);
             JSObject result = new JSObject();
             result.put("bundles", bundles);
-            result.put("locationName", preferences().getString(TREE_NAME, ""));
+            result.put("locationName", grantedTreeName(treeValue));
             call.resolve(result);
         } catch (Exception error) {
             call.reject("Could not read offline downloads.", error);
@@ -737,6 +737,12 @@ public class TmsOfflinePlugin extends Plugin {
             }
         } catch (Exception ignored) {}
         return null;
+    }
+
+    // A folder name without its grant would label the location as chosen
+    // ("Change folder", "saved in ...") while downloads are refused.
+    private String grantedTreeName(String treeValue) {
+        return hasTreePermission(treeValue) ? preferences().getString(TREE_NAME, "") : "";
     }
 
     private boolean hasTreePermission(String value) {

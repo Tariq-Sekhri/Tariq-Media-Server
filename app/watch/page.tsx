@@ -29,7 +29,10 @@ import { resolveOfflineFileUrl } from "../lib/offline";
 import { endingSkipAdvancesEpisode } from "../lib/skip-action";
 import { restorePlaybackSession as restoreSharedPlaybackSession, setPlaybackSession as setSharedPlaybackSession, startPlaybackSession as startSharedPlaybackSession, type PlaybackSession, selectPlaybackItem, playbackReturnUrl } from "../lib/playback-session";
 import { loadPlaybackQueue, queueSourceForItem, readQueueSource, writeQueueSource, type QueueSource } from "../lib/playback-queue";
-import { closeWatch as closeSharedWatch, expandWatch as expandSharedWatch, leaveWatch as leaveSharedWatch, minimizeWatch as minimizeSharedWatch, replaceWatchLocation as replaceSharedWatchLocation, setWatchBackHandler as setSharedWatchBackHandler, useWatchMode, watchLocationSearch as sharedWatchLocationSearch, updateCompanionWatch, closeCompanionWatch, minimizeCompanionWatch, expandCompanionWatch, type WatchInstance } from "../lib/app-shell";
+import { closeWatch as closeSharedWatch, expandWatch as expandSharedWatch, leaveWatch as leaveSharedWatch, minimizeWatch as minimizeSharedWatch, replaceWatchLocation as replaceSharedWatchLocation, setWatchBackHandler as setSharedWatchBackHandler, useWatchMode, watchLocationSearch as sharedWatchLocationSearch, updateCompanionWatch, closeCompanionWatch, minimizeCompanionWatch, expandCompanionWatch, navigateApp, type WatchInstance } from "../lib/app-shell";
+import { createWatchRoom, followRoomUrl, roomWatchUrl, sendWatchRoomCommand, useWatchRoom, watchRoomStartFor, WATCH_ROOMS_CHANGED_EVENT, type WatchRoomMedia } from "../lib/watch-room";
+import { useWatchRoomSync } from "../lib/use-watch-room-sync";
+import { WatchTogetherPlayerButton } from "../WatchTogether";
 
 type WatchDetails = { queueSource?: QueueSource; src: string; sourcePath?: string; offline?: boolean; offlineBundleId?: string; offlineFileId?: string; name: string; size: string; folder: string; series?: string; imdbId?: string; season?: number; episode?: number; customQueue: boolean; queueLabel?: string; queueFolder?: string; queueSort?: string; queueDirection?: string; queueShuffle: boolean; queueShuffleSeed?: string; startAt: number; playIntent: boolean; playAttemptId?: string; playAttemptStartedAt?: number; kind: string; moviesTv: boolean; catalogKind?: "movie" | "series" | "episode" };
 type SubtitleTrack = { label: string; language: string; url: string; mode?: "burn_in"; stream_index?: number };
@@ -1264,6 +1267,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         if (!handoff) {
           initialResumeRef.current = !savesWatchProgress(path) ? 0 : playback ? (!playback.completed ? playback.position : 0) : Math.max(0, details.startAt);
         }
+        applyRoomStart(path);
         setSavedPlayback(playback);
         setSavedPlaybackLoaded(true);
       })
@@ -1271,6 +1275,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         if (cancelled) return;
         const playback = readLocalWatchProgress(getSessionUser()?.id)[path] ?? null;
         if (!handoff) initialResumeRef.current = !savesWatchProgress(path) ? 0 : playback ? (!playback.completed ? playback.position : 0) : Math.max(0, details.startAt);
+        applyRoomStart(path);
         setSavedPlayback(playback);
         setFavorite(false);
         setOrganizeActive(false);
@@ -1286,6 +1291,16 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     const path = detailsMediaPath(details);
     setFavorite(Boolean(queue.find((item) => item.path === path || item.src === details.src)?.favorite));
   }, [details?.src, details?.kind, queue]);
+
+  // Joining a room (or following it to new media) starts where the room is,
+  // instead of this member's own saved progress.
+  const applyRoomStart = (path: string) => {
+    if (companionRef.current) return;
+    const start = watchRoomStartFor(path);
+    if (!start) return;
+    initialResumeRef.current = start.position;
+    shouldPlayRef.current = start.playing;
+  };
 
   const toggleFavorite = async () => {
     if (!details) return;
@@ -2050,7 +2065,16 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     const timer = setTimeout(() => setInitialSkipPromptKey(null), 5_000);
     return () => clearTimeout(timer);
   }, [activeSkipPromptKey]);
-  const autoSkipEnabled = autoSkipEnabledFor(details, playbackPreferences);
+  // In a Watch Together room, everything that changes what plays or when is
+  // shared: these room settings replace the personal ones while inside it.
+  const watchRoom = useWatchRoom();
+  const roomSyncActive = Boolean(watchRoom.room) && !companionInstance && Boolean(details) && !details?.offline && details?.kind !== "audio";
+  const roomSettings = roomSyncActive ? watchRoom.room?.settings ?? null : null;
+  const effectivePreferences: PlaybackPreferences = roomSettings
+    ? { ...playbackPreferences, auto_next_enabled: roomSettings.auto_next, image_seconds: normalizeImageSeconds(roomSettings.image_seconds) }
+    : playbackPreferences;
+  const effectiveLoop = roomSettings ? roomSettings.loop_enabled : loopEnabled;
+  const autoSkipEnabled = roomSettings ? roomSettings.auto_skip : autoSkipEnabledFor(details, playbackPreferences);
   const currentQueueIndex = queue.findIndex((item) => {
     if (!details) return false;
     if (item.src === details.src) return true;
@@ -2081,7 +2105,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     for (const image of imagePreloadsRef.current.values()) image.src = "";
     imagePreloadsRef.current.clear();
   }, []);
-  const imageSeconds = playbackPreferences.image_seconds;
+  const imageSeconds = effectivePreferences.image_seconds;
 
   useLayoutEffect(() => {
     if (!queueMenuOpen || !queueMenuPosition) return;
@@ -2128,16 +2152,16 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     const interval = setInterval(() => {
       setCurrentTime((current) => {
         if (current >= imageSeconds) {
-          if (loopEnabled) return 0;
+          if (effectiveLoop) return 0;
           clearInterval(interval);
-          if (playbackPreferences.auto_next_enabled && nextQueueItem) goToQueueItem(nextQueueItem, true);
+          if (effectivePreferences.auto_next_enabled && nextQueueItem) goToQueueItem(nextQueueItem, true);
           return imageSeconds;
         }
         return current + 0.1;
       });
     }, 100);
     return () => clearInterval(interval);
-  }, [details?.src, playing, loopEnabled, nextQueueItem, playbackPreferences.auto_next_enabled, details?.kind, imageSeconds]);
+  }, [details?.src, playing, effectiveLoop, nextQueueItem, effectivePreferences.auto_next_enabled, details?.kind, imageSeconds]);
 
   const playbackStartupPending = () => !savedPlaybackLoaded
     || !metadataLoaded
@@ -2145,7 +2169,22 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     || initialResumeAppliedRef.current !== details?.src
     || (!directPlaybackCompatibleRef.current && quality === "original");
 
-  const resumePlayback = () => {
+  const roomPositionNow = () => {
+    if (details?.kind === "image") return currentTime;
+    if (qualityBusyRef.current || playbackStartupPending()) return undefined;
+    const media = backgroundAudioRef.current ?? videoRef.current;
+    return media ? media.currentTime + streamOffsetRef.current : undefined;
+  };
+  // A member pressing Play while the room already plays (or Pause while it is
+  // paused) is only catching up locally; announcing it would pull everyone
+  // to this member's possibly stale position.
+  const announcePlayback = (playingNow: boolean) => {
+    const room = watchRoom.room;
+    if (!roomSyncActive || !room || room.playback.playing === playingNow) return;
+    sendWatchRoomCommand(playingNow ? "play" : "pause", { position: roomPositionNow() });
+  };
+  const resumePlayback = (fromRoom = false) => {
+    if (!fromRoom) announcePlayback(true);
     if (details?.kind === "image") {
       setPlaying(true);
       return;
@@ -2163,7 +2202,8 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     shouldPlayRef.current = true;
     if (video.paused) playSafely(video);
   };
-  const pausePlayback = () => {
+  const pausePlayback = (fromRoom = false) => {
+    if (!fromRoom) announcePlayback(false);
     if (details?.kind === "image") {
       setPlaying(false);
       return;
@@ -2176,7 +2216,8 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
   const togglePlayback = () => {
     const video = backgroundAudioRef.current ?? videoRef.current;
     if (details?.kind === "image") {
-      setPlaying((current) => !current);
+      if (playing) pausePlayback();
+      else resumePlayback();
     } else if (video?.paused) {
       resumePlayback();
     } else {
@@ -2311,8 +2352,13 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     }
   };
   const clampPlaybackRate = (value: number) => Math.max(PLAYBACK_SPEED_MIN, Math.min(PLAYBACK_SPEED_MAX, value));
-  const adjustPlaybackRate = (delta: number) => setPlaybackRate((current) => clampPlaybackRate(Number((current + delta).toFixed(2))));
-  const resetPlaybackRate = () => setPlaybackRate(1);
+  const changePlaybackRate = (rate: number) => {
+    const next = clampPlaybackRate(Number(rate.toFixed(2)));
+    setPlaybackRate(next);
+    if (roomSyncActive) sendWatchRoomCommand("rate", { rate: next });
+  };
+  const adjustPlaybackRate = (delta: number) => changePlaybackRate(playbackRate + delta);
+  const resetPlaybackRate = () => changePlaybackRate(1);
   const cancelTranscodeSession = async (session: string) => {
     await fetch(`${API_BASE}/api/transcode?session=${encodeURIComponent(session)}`, {
       method: "DELETE",
@@ -2569,11 +2615,12 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     }
   };
 
-  const seekTo = (targetTime: number) => {
+  const seekTo = (targetTime: number, fromRoom = false) => {
     setMediaSessionSyncId((id) => id + 1);
     const video = videoRef.current;
     if (!video) return;
     const target = Math.min(duration || 0, Math.max(0, targetTime));
+    if (roomSyncActive && !fromRoom) sendWatchRoomCommand("seek", { position: target });
     if (backgroundAudioRef.current) {
       backgroundAudioRef.current.currentTime = Math.max(0, target - streamOffsetRef.current);
       setCurrentTime(target);
@@ -2631,6 +2678,10 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
   }, [autoSkipEnabled, activeSkipSegment, details?.moviesTv, playing]);
 
   const updateAutoSkip = (enabled: boolean) => {
+    if (roomSyncActive) {
+      sendWatchRoomCommand("settings", { settings: { auto_skip: enabled }, reason: "auto skip" });
+      return;
+    }
     const showKey = details && autoSkipShowKey(details);
     const next = showKey
       ? { ...playbackPreferences, auto_skip_by_show: { ...playbackPreferences.auto_skip_by_show, [showKey]: enabled } }
@@ -2649,6 +2700,10 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
 };
 
   const updateAutoNext = (enabled: boolean) => {
+    if (roomSyncActive) {
+      sendWatchRoomCommand("settings", { settings: { auto_next: enabled }, reason: "auto next" });
+      return;
+    }
     const next = { ...playbackPreferences, auto_next_enabled: enabled };
     setPlaybackPreferences(next);
     void authFetch(`${API_BASE}/api/playback-preferences`, {
@@ -2664,6 +2719,10 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
   };
 
   const updateImageSeconds = (seconds: number) => {
+    if (roomSyncActive) {
+      sendWatchRoomCommand("settings", { settings: { image_seconds: normalizeImageSeconds(seconds) }, reason: "image duration" });
+      return;
+    }
     const previous = playbackPreferences;
     const next = { ...previous, image_seconds: normalizeImageSeconds(seconds) };
     setPlaybackPreferences(next);
@@ -3165,6 +3224,79 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     }
   }, [queue, details?.src]);
 
+  const roomMediaForDetails = (): WatchRoomMedia | null => {
+    if (!details || details.offline || details.kind === "audio") return null;
+    const path = detailsMediaPath(details);
+    if (!path) return null;
+    const search = watchLocationSearch();
+    const fromLocation = new URLSearchParams(search).get("src") === details.src;
+    const url = fromLocation ? roomWatchUrl(search) : `/watch?${new URLSearchParams({
+      src: details.src, path, name: details.name, size: details.size, folder: details.folder, kind: details.kind,
+      ...(details.moviesTv ? { catalog: "movies_tv" } : {}),
+      ...(details.series ? { series: details.series } : {}),
+    })}`;
+    return { path, name: details.name, kind: details.kind, url };
+  };
+  const startRoomHere = async () => {
+    const media = roomMediaForDetails();
+    const activeMedia = backgroundAudioRef.current ?? videoRef.current;
+    await createWatchRoom({
+      media,
+      position: roomPositionNow() ?? currentTime,
+      playing: details?.kind === "image" ? playing : Boolean(activeMedia && !activeMedia.paused),
+      rate: playbackRate,
+      settings: { auto_skip: autoSkipEnabled, auto_next: playbackPreferences.auto_next_enabled, image_seconds: playbackPreferences.image_seconds, loop_enabled: loopEnabled },
+    });
+    window.dispatchEvent(new Event(WATCH_ROOMS_CHANGED_EVENT));
+  };
+  useWatchRoomSync({
+    enabled: roomSyncActive,
+    mediaPath: details && !details.offline ? detailsMediaPath(details) || null : null,
+    kind: details?.kind ?? "video",
+    ready: () => details?.kind === "image" || (Boolean(backgroundAudioRef.current ?? videoRef.current) && !qualityBusyRef.current && !playbackStartupPending()),
+    position: () => {
+      if (!details) return null;
+      if (details.kind === "image") return currentTime;
+      const media = backgroundAudioRef.current ?? videoRef.current;
+      return media ? media.currentTime + streamOffsetRef.current : null;
+    },
+    playing: () => {
+      if (details?.kind === "image") return playing;
+      const media = backgroundAudioRef.current ?? videoRef.current;
+      return Boolean(media && !media.paused);
+    },
+    buffering: () => {
+      if (details?.kind === "image") return false;
+      const media = backgroundAudioRef.current ?? videoRef.current;
+      return !media || loadingTargetRef.current !== null || media.seeking || media.readyState < 3;
+    },
+    duration: () => sourceDurationRef.current || duration,
+    rate: playbackRate,
+    play: () => resumePlayback(true),
+    pause: () => pausePlayback(true),
+    seek: (seconds) => seekTo(seconds, true),
+    setRate: (rate) => setPlaybackRate(clampPlaybackRate(rate)),
+    nudgeRate: (rate) => {
+      const media = backgroundAudioRef.current ?? videoRef.current;
+      if (!media || details?.kind === "image") return;
+      const target = rate ?? playbackRate;
+      if (Math.abs(media.playbackRate - target) > 0.0005) media.playbackRate = target;
+    },
+    roomMedia: roomMediaForDetails,
+    blocked: (message) => {
+      pausePlayback(true);
+      setPlaybackError(message);
+    },
+    openMedia: (media, position, playingNow) => {
+      const item = queue.find((entry) => entry.path === media.path);
+      if (item?.src && !companionRef.current) {
+        goToQueueItem(item);
+        return;
+      }
+      navigateApp(followRoomUrl(media, position, playingNow));
+    },
+  });
+
   const reorderQueue = (fromIndex: number, toIndex: number) => {
     if (fromIndex === toIndex) return;
     applyQueue((current) => {
@@ -3200,7 +3332,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     if (completed) {
       saveProgress(video, true);
       reportPlayback("completed", video);
-      if (!loopEnabled && playbackPreferences.auto_next_enabled) goToQueueItem(nextQueueItem, true);
+      if (!effectiveLoop && effectivePreferences.auto_next_enabled) goToQueueItem(nextQueueItem, true);
       return;
     }
     saveProgress(video);
@@ -3501,7 +3633,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         });
       }
       else if (action === "close") {
-        pausePlayback();
+        pausePlayback(true);
         stopBackgroundAudio();
       }
     }).then((handle) => { actionHandle = handle; }).catch(console.error);
@@ -3623,7 +3755,8 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
   // the in-app mini player is active.
   const miniPlayer = watchMode === "mini" && !nativePip;
   const closeMiniPlayer = () => {
-    pausePlayback();
+    // Closing your own player leaves the room playing for everyone else.
+    pausePlayback(true);
     // Closing ends playback, like the audio mini player's close button.
     const shared = restorePlaybackSession(getSessionUser()?.id);
     if (shared && details && shared.item.path === detailsMediaPath(details)) setPlaybackSession(null);
@@ -3775,7 +3908,8 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         }}>{activeCue.text}</div>}
         <WatchPlayerControls
           playbackRate={playbackRate}
-          onSetPlaybackRate={(rate) => setPlaybackRate(clampPlaybackRate(rate))}
+          onSetPlaybackRate={changePlaybackRate}
+          watchTogether={!companionInstance && details && !details.offline && details.kind !== "audio" ? <WatchTogetherPlayerButton onStartRoom={startRoomHere} /> : null}
           details={details}
           duration={duration}
           displayedTime={displayedTime}
@@ -3812,14 +3946,14 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
           controlsRef={controlsRef}
           queueMenuOpen={queueMenuOpen}
           onToggleQueueMenu={() => { setQueueMenuOpen((open) => !open); setVolumeMenuOpen(false); setSettingsMenuOpen(false); setQualityMenuOpen(false); setCaptionMenuOpen(false); setControlsVisible(true); }}
-          playbackPreferences={playbackPreferences}
+          playbackPreferences={effectivePreferences}
           autoSkipEnabled={autoSkipEnabled}
           onUpdateAutoSkip={updateAutoSkip}
           onUpdateAutoNext={updateAutoNext}
           onUpdateImageSeconds={updateImageSeconds}
           onUpdateBufferSize={updateBufferSize}
-          loopEnabled={loopEnabled}
-          onToggleLoop={() => setLoopEnabled((value) => !value)}
+          loopEnabled={effectiveLoop}
+          onToggleLoop={() => { if (roomSyncActive) sendWatchRoomCommand("settings", { settings: { loop_enabled: !effectiveLoop }, reason: "loop" }); else setLoopEnabled((value) => !value); }}
           favorite={favorite}
           onToggleFavorite={toggleFavorite}
           organizeActive={organizeActive}
@@ -3912,7 +4046,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         src={slot === activeVideoSlot ? (quality === "original" ? details.src : undefined) : preparedVideo?.slot === slot ? preparedVideo.src : undefined}
         playsInline
         preload={audioCompatibilityChecked && audioTracks.length <= 1 ? "auto" : "metadata"}
-        loop={loopEnabled}
+        loop={effectiveLoop}
         muted={muted}
         onLoadedMetadata={(event) => { setVideoLoadError(false); handleVideoMetadata(event.currentTarget); }}
         onError={() => { setVideoLoadError(true); setLoadStalled(true); }}

@@ -38,6 +38,15 @@ public class MainActivity extends BridgeActivity {
     private int pipWidth = 16;
     private int pipHeight = 9;
     private boolean pipSettingsRequested;
+    private boolean hideAfterPipExit;
+    // Android reports isInPictureInPictureMode() before its enter transition
+    // finishes, and drops an expand request made in that window, leaving PiP
+    // open. Expand only once onPictureInPictureModeChanged(true) confirms it.
+    private boolean pipEnterSettled;
+    private int pipExpandAttempts;
+    private static final long PIP_EXPAND_RETRY_MS = 200;
+    private static final int PIP_EXPAND_MAX_ATTEMPTS = 10;
+    private final Runnable expandPipForAudioExit = this::requestPipExpand;
     private boolean rendererRecoveryStarted;
     private final Runnable rehideSystemBars = this::applyStickyImmersiveMode;
     private static final long RECONNECT_INTERVAL_MS = 15_000;
@@ -121,7 +130,8 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
-        TmsPipPlugin.emitAction("foreground");
+        if (!hideAfterPipExit) TmsPipPlugin.emitAction("foreground");
+        if (hideAfterPipExit && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !isInPictureInPictureMode()) finishAudioPipExit();
         scheduleStickyImmersiveMode();
         reconnectHandler.removeCallbacks(reconnectProbe);
         if (TmsConnectionActivity.usingOfflineFallback) reconnectHandler.post(reconnectProbe);
@@ -191,7 +201,10 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode);
+        pipEnterSettled = isInPictureInPictureMode;
+        if (isInPictureInPictureMode && hideAfterPipExit) requestPipExpand();
         TmsPipPlugin.emitState(isInPictureInPictureMode);
+        if (!isInPictureInPictureMode && hideAfterPipExit) finishAudioPipExit();
         if (!isInPictureInPictureMode) scheduleStickyImmersiveMode();
     }
 
@@ -264,7 +277,43 @@ public class MainActivity extends BridgeActivity {
     }
 
     public void exitTmsPip() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isInPictureInPictureMode()) moveTaskToBack(false);
+        runOnUiThread(() -> {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !isInPictureInPictureMode()) return;
+            // Moving an already pinned task to the back does not unpin it.
+            // Bring the existing activity out of PiP, then hide the same task
+            // once Android confirms that transition. Keep its WebView/player.
+            hideAfterPipExit = true;
+            pipEligible = false;
+            setPictureInPictureParams(buildPipParams());
+            pipExpandAttempts = 0;
+            // While entering, onPictureInPictureModeChanged(true) expands.
+            if (pipEnterSettled) requestPipExpand();
+            else getWindow().getDecorView().postDelayed(expandPipForAudioExit, PIP_EXPAND_RETRY_MS);
+        });
+    }
+
+    private void requestPipExpand() {
+        View decorView = getWindow().getDecorView();
+        decorView.removeCallbacks(expandPipForAudioExit);
+        if (!hideAfterPipExit || Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !isInPictureInPictureMode()) return;
+        if (pipExpandAttempts++ >= PIP_EXPAND_MAX_ATTEMPTS) {
+            // Give up rather than hide the task when the user expands it later.
+            hideAfterPipExit = false;
+            return;
+        }
+        startActivity(new Intent(this, MainActivity.class)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP));
+        // Android can still ignore the request; ask again until PiP closes.
+        decorView.postDelayed(expandPipForAudioExit, PIP_EXPAND_RETRY_MS);
+    }
+
+    private void finishAudioPipExit() {
+        getWindow().getDecorView().post(() -> {
+            if (!hideAfterPipExit || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isInPictureInPictureMode())) return;
+            getWindow().getDecorView().removeCallbacks(expandPipForAudioExit);
+            moveTaskToBack(true);
+            hideAfterPipExit = false;
+        });
     }
 
     public static void dispatchPipAction(String action) {

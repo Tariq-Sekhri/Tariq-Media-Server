@@ -658,3 +658,42 @@
   .miniplayer.expanded .miniplayer-shell.watch-controls { padding: 12px; justify-content: flex-start; }
   .miniplayer.expanded .miniplayer-header { padding: 8px 12px; }
 }
+
+/* Watch Together: always visible in the bar, since it is how a member sees
+   who is in the room and leaves it. */
+.watch-together-control { position: relative; display: inline-flex; flex: 0 0 auto; }
+.watch-control-row .watch-together-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 40px; }
+.watch-together-trigger svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.watch-control-row .watch-together-trigger.active { border-color: #8f7cf0; background: #2a2540; }
+.watch-control-row .watch-together-trigger.warn { border-color: #d6a14a; }
+.watch-together-trigger em { font-style: normal; font-size: 13px; font-weight: 800; }
+.watch-together-menu { position: absolute; right: 0; bottom: calc(100% + 10px); z-index: 25; width: min(320px, calc(100vw - 24px)); max-height: min(440px, calc(100vh - 150px)); overflow-y: auto; display: grid; gap: 10px; border: 1px solid #343a42; border-radius: 12px; padding: 12px; background: #15191ef2; box-shadow: 0 14px 45px #000a; backdrop-filter: blur(18px); color: #e8ebed; font-size: 13px; text-align: left; }
+.watch-together-menu-head { display: grid; gap: 2px; }
+.watch-together-menu-head b { font-size: 14px; }
+.watch-together-menu small { color: #a3acb3; font-size: 12px; }
+.watch-together-menu .ok { color: #7fd6a4; }
+.watch-together-menu .warn { color: #e6b45f; }
+.watch-together-members { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.watch-together-members li { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; }
+.watch-together-members li span, .watch-together-members li small { grid-column: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.watch-together-members li em { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-style: normal; font-size: 12px; font-weight: 700; }
+.watch-together-note { margin: 0; color: #a3acb3; font-size: 12px; line-height: 1.4; }
+.watch-together-error { margin: 0; color: #ff9b8f; font-size: 12px; }
+.watch-together-room { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid #2c323a; border-radius: 9px; padding: 8px 10px; }
+.watch-together-room > div { display: grid; gap: 2px; min-width: 0; }
+.watch-together-room b, .watch-together-room small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.watch-together-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.watch-together-menu button { height: auto; min-height: 36px; border: 1px solid #3a414a; border-radius: 8px; padding: 0 12px; background: #222831; color: #f4f4f2; font-size: 13px; font-weight: 700; cursor: pointer; }
+.watch-together-menu button:hover { background: #2b3139; }
+.watch-together-menu button.primary { border-color: #6b57d6; background: #6b57d6; }
+.watch-together-menu button.danger { color: #ffb4ab; }
+.watch-together-menu button:disabled { opacity: .55; cursor: default; }
+
+/* Corner stack card, alongside active downloads. */
+.unified-layout .magnet-background-downloads article.watch-together-card.active { border-color: #6b57d6; }
+.unified-layout .magnet-background-downloads article.watch-together-card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unified-layout .magnet-background-downloads article.watch-together-card .watch-together-error { color: #ff9b8f; }
+.unified-layout .magnet-background-downloads article.watch-together-card span { font-size: 11px; }
+.unified-layout .magnet-background-downloads article.watch-together-card b { font-size: 14px; }
+.unified-layout .magnet-background-downloads article.watch-together-card small { font-size: 12px; }
+.unified-layout .magnet-background-downloads article.watch-together-card .magnet-background-actions button { min-height: 32px; padding: 6px 12px; font-size: 12px; }

@@ -40,6 +40,7 @@ mod discovery;
 mod qbit;
 mod preview_discovery;
 mod uploads;
+mod watch_rooms;
 mod ytdlp_archive;
 #[cfg(test)]
 mod reservation_tests;
@@ -138,6 +139,7 @@ struct AppState {
     thumbnail_run_lock: Arc<tokio::sync::Mutex<()>>,
     thumbnail_control_notify: Arc<tokio::sync::Notify>,
     active_playback: Arc<tokio::sync::Mutex<HashMap<String, ActivePlayback>>>,
+    watch_rooms: watch_rooms::SharedWatchRooms,
     library_duration_cache_path: PathBuf,
     library_duration_cache: Arc<tokio::sync::Mutex<HashMap<String, CachedLibraryDuration>>>,
     library_cache: Arc<tokio::sync::RwLock<HashMap<Option<String>, Vec<LibraryEntry>>>>,
@@ -1894,6 +1896,7 @@ async fn main() {
         thumbnail_run_lock: Arc::new(tokio::sync::Mutex::new(())),
         thumbnail_control_notify: Arc::new(tokio::sync::Notify::new()),
         active_playback: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        watch_rooms: Arc::new(watch_rooms::WatchRooms::default()),
         library_duration_cache_path,
         library_duration_cache: Arc::new(tokio::sync::Mutex::new(library_duration_cache)),
         library_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
@@ -1913,6 +1916,7 @@ async fn main() {
     spawn_trickplay_cache_sweep(state.clone());
     spawn_background_indexer(state.clone());
     spawn_preview_discovery_worker(state.clone());
+    watch_rooms::spawn_room_sweeper(state.watch_rooms.clone());
     for (library, config) in read_libraries(&state).await {
         schedule_browser_media_library(state.clone(), library.clone());
         if config.trickplay_enabled {
@@ -2075,6 +2079,8 @@ async fn main() {
             "/api/profile/sessions/{token}",
             axum::routing::delete(revoke_profile_session),
         )
+        .route("/api/watch-rooms", get(watch_rooms::list_rooms).post(watch_rooms::create_room))
+        .route("/api/watch-rooms/socket", get(watch_rooms::room_socket))
         .route("/api/activity", post(playback_activity))
         .route("/api/activity/access", post(access_activity))
         .route("/api/activity/file-download", post(file_download_activity))
@@ -4576,6 +4582,8 @@ async fn write_sessions(path: &Path, sessions: &[StoredSession]) -> Result<(), S
 
 #[cfg(test)]
 mod auth_persistence_tests;
+#[cfg(test)]
+mod reported_regression_tests;
 
 mod playback_progress;
 

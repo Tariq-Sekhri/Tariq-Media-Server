@@ -34,7 +34,8 @@ export default defineConfig({
     },
     allowedHosts,
     proxy: demo ? undefined : {
-      "/api": backendUrl,
+      // Watch Together keeps a WebSocket open through this proxy.
+      "/api": { target: backendUrl, ws: true },
       "/media": backendUrl,
       "/folder-downloads": backendUrl,
       "/trash-files": backendUrl,

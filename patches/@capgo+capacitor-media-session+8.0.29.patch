@@ -265,7 +265,7 @@ index ce25ddf..20643a4 100644
      public void getPluginVersion(final PluginCall call) {
          try {
 diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
-index e2c1f05..c88c001 100644
+index e2c1f05..39ff320 100644
 --- a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
 +++ b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
 @@ -11,6 +11,8 @@ import android.graphics.Bitmap;
@@ -303,7 +303,7 @@ index e2c1f05..c88c001 100644
      private int playbackState = PlaybackStateCompat.STATE_NONE;
      private String title = "";
      private String artist = "";
-@@ -66,6 +69,31 @@ public class MediaSessionService extends Service {
+@@ -66,6 +69,44 @@ public class MediaSessionService extends Service {
      private boolean playbackStateUpdate = false;
      private boolean mediaMetadataUpdate = false;
      private boolean notificationUpdate = false;
@@ -321,21 +321,54 @@ index e2c1f05..c88c001 100644
 +                    if (entry.getId() == NOTIFICATION_ID && entry.getTag() == null) { posted = true; break; }
 +                }
 +                if (!posted) {
-+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-+                        startForeground(NOTIFICATION_ID, notificationBuilder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
-+                    } else {
-+                        startForeground(NOTIFICATION_ID, notificationBuilder.build());
++                    if (startForegroundSafely(notificationBuilder)) {
++                        Log.i(TAG, "Restored active playback notification while app is backgrounded");
 +                    }
-+                    Log.i(TAG, "Restored active playback notification while app is backgrounded");
 +                }
 +            }
 +            notificationHandler.postDelayed(this, 5_000);
 +        }
 +    };
++
++    // Android drops notification updates above ~5/s, which can leave a
++    // paused track showing Pause. Coalesce posts so the latest state lands.
++    private long lastNotificationPost = 0;
++    // Plugin calls run update() on the Capacitor plugin thread while these
++    // posts build on the main thread; the builder's action list is shared,
++    // so every builder access holds the service lock.
++    private final Runnable postNotification = new Runnable() {
++        @Override public void run() {
++            synchronized (MediaSessionService.this) {
++                if (notificationBuilder == null || notificationManager == null) return;
++                lastNotificationPost = android.os.SystemClock.uptimeMillis();
++                notificationManager.notify(NOTIFICATION_ID, notificationBuilder.build());
++            }
++        }
++    };
  
      private MediaSessionPlugin plugin;
  
-@@ -119,6 +147,8 @@ public class MediaSessionService extends Service {
+@@ -86,12 +127,17 @@ public class MediaSessionService extends Service {
+     @Override
+     public boolean onUnbind(Intent intent) {
+         destroy();
+-        return super.onUnbind(intent);
++        // Request onRebind so a service that survives this unbind still gets
++        // onUnbind (and releases its session) after the next binding ends.
++        return true;
+     }
+ 
+-    public void connectAndInitialize(MediaSessionPlugin plugin, Intent intent) {
++    public synchronized void connectAndInitialize(MediaSessionPlugin plugin, Intent intent) {
+         this.plugin = plugin;
+ 
++        // A service that survives an unbind is reconnected here. Release the
++        // previous session so only one session can receive media buttons.
++        releaseMediaSession();
+         mediaSession = new MediaSessionCompat(this, "CapgoMediaSession");
+         mediaSession.setCallback(new MediaSessionCallback(plugin));
+         mediaSession.setActive(true);
+@@ -119,6 +165,8 @@ public class MediaSessionService extends Service {
          notificationBuilder = new NotificationCompat.Builder(this, CHANNEL_ID)
              .setStyle(notificationStyle)
              .setSmallIcon(R.drawable.ic_baseline_volume_up_24)
@@ -344,15 +377,20 @@ index e2c1f05..c88c001 100644
              .setContentIntent(
                  PendingIntent.getActivity(
                      getApplicationContext(),
-@@ -134,6 +164,7 @@ public class MediaSessionService extends Service {
-         } else {
-             startForeground(NOTIFICATION_ID, notificationBuilder.build());
-         }
-+        foregroundStarted = true;
+@@ -129,11 +177,7 @@ public class MediaSessionService extends Service {
+             )
+             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+ 
+-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+-            startForeground(NOTIFICATION_ID, notificationBuilder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+-        } else {
+-            startForeground(NOTIFICATION_ID, notificationBuilder.build());
+-        }
++        startForegroundSafely(notificationBuilder);
  
          notificationActions.put(
              "play",
-@@ -142,7 +173,7 @@ public class MediaSessionService extends Service {
+@@ -142,7 +186,7 @@ public class MediaSessionService extends Service {
                  "Play",
                  MediaButtonReceiver.buildMediaButtonPendingIntent(
                      this,
@@ -361,7 +399,7 @@ index e2c1f05..c88c001 100644
                  )
              )
          );
-@@ -153,7 +184,7 @@ public class MediaSessionService extends Service {
+@@ -153,7 +197,7 @@ public class MediaSessionService extends Service {
                  "Pause",
                  MediaButtonReceiver.buildMediaButtonPendingIntent(
                      this,
@@ -370,7 +408,7 @@ index e2c1f05..c88c001 100644
                  )
              )
          );
-@@ -197,6 +228,10 @@ public class MediaSessionService extends Service {
+@@ -197,6 +241,10 @@ public class MediaSessionService extends Service {
                  MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_STOP)
              )
          );
@@ -381,7 +419,7 @@ index e2c1f05..c88c001 100644
  
          playbackStateActions.put("previoustrack", PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS);
          playbackStateActions.put("seekbackward", PlaybackStateCompat.ACTION_REWIND);
-@@ -208,17 +243,90 @@ public class MediaSessionService extends Service {
+@@ -208,17 +256,116 @@ public class MediaSessionService extends Service {
          playbackStateActions.put("stop", PlaybackStateCompat.ACTION_STOP);
      }
  
@@ -398,18 +436,45 @@ index e2c1f05..c88c001 100644
 +        );
 +    }
 +
-+    public void updateFavoriteAction(boolean active) {
++    public synchronized void updateFavoriteAction(boolean active) {
 +        favoriteActive = active;
 +        notificationActions.put("favorite", buildFavoriteAction(active));
 +        possibleActionsUpdate = true;
 +        update();
 +    }
 +
++    private synchronized boolean startForegroundSafely(NotificationCompat.Builder builder) {
++        try {
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
++                startForeground(NOTIFICATION_ID, builder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
++            } else {
++                startForeground(NOTIFICATION_ID, builder.build());
++            }
++            foregroundStarted = true;
++            return true;
++        } catch (IllegalStateException ex) {
++            // Includes ForegroundServiceStartNotAllowedException while hidden.
++            Log.w(TAG, "Could not promote media service to foreground", ex);
++            return false;
++        }
++    }
++
++    private void releaseMediaSession() {
++        if (mediaSession == null) return;
++        mediaSession.setActive(false);
++        mediaSession.release();
++        mediaSession = null;
++    }
++
      public void destroy() {
++        // The plugin is unbinding: never leave a live session behind, even if
++        // this service instance survives for a newer start request.
++        notificationHandler.removeCallbacks(maintainPlaybackNotification);
++        notificationHandler.removeCallbacks(postNotification);
++        releaseMediaSession();
 +        // An old binding can finish after another start request is queued.
 +        // Only stop the started-service generation that this instance handled.
 +        if (lastStartId != 0 && !stopSelfResult(lastStartId)) return;
-+        notificationHandler.removeCallbacks(maintainPlaybackNotification);
          stopForeground(true);
 -        stopSelf();
 +        foregroundStarted = false;
@@ -419,11 +484,8 @@ index e2c1f05..c88c001 100644
 +    @Override
 +    public void onDestroy() {
 +        notificationHandler.removeCallbacks(maintainPlaybackNotification);
-+        if (mediaSession != null) {
-+            mediaSession.setActive(false);
-+            mediaSession.release();
-+            mediaSession = null;
-+        }
++        notificationHandler.removeCallbacks(postNotification);
++        releaseMediaSession();
 +        super.onDestroy();
 +    }
 +
@@ -452,17 +514,19 @@ index e2c1f05..c88c001 100644
 +                notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
 +                if (notificationManager != null) notificationManager.createNotificationChannel(channel);
 +            }
-+            NotificationCompat.Builder starting = notificationBuilder != null ? notificationBuilder : new NotificationCompat.Builder(this, CHANNEL_ID)
-+                .setSmallIcon(R.drawable.ic_baseline_volume_up_24)
-+                .setContentTitle("TMS")
-+                .setContentText("Preparing playback")
-+                .setOnlyAlertOnce(true);
-+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-+                startForeground(NOTIFICATION_ID, starting.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
-+            } else {
-+                startForeground(NOTIFICATION_ID, starting.build());
++            synchronized (this) {
++                NotificationCompat.Builder starting = notificationBuilder != null ? notificationBuilder : new NotificationCompat.Builder(this, CHANNEL_ID)
++                    .setSmallIcon(R.drawable.ic_baseline_volume_up_24)
++                    .setContentTitle("TMS")
++                    .setContentText("Preparing playback")
++                    .setOnlyAlertOnce(true);
++                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
++                    startForeground(NOTIFICATION_ID, starting.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
++                } else {
++                    startForeground(NOTIFICATION_ID, starting.build());
++                }
++                foregroundStarted = true;
 +            }
-+            foregroundStarted = true;
 +        }
          if (mediaSession != null) {
              MediaButtonReceiver.handleIntent(mediaSession, intent);
@@ -474,7 +538,7 @@ index e2c1f05..c88c001 100644
      }
  
      public void setPlaybackState(int newPlaybackState) {
-@@ -226,6 +334,11 @@ public class MediaSessionService extends Service {
+@@ -226,6 +373,11 @@ public class MediaSessionService extends Service {
              playbackState = newPlaybackState;
              playbackStateUpdate = true;
              possibleActionsUpdate = true;
@@ -486,7 +550,16 @@ index e2c1f05..c88c001 100644
          }
      }
  
-@@ -318,7 +431,16 @@ public class MediaSessionService extends Service {
+@@ -282,7 +434,7 @@ public class MediaSessionService extends Service {
+     }
+ 
+     @SuppressLint("RestrictedApi")
+-    public void update() {
++    public synchronized void update() {
+         if (possibleActionsUpdate) {
+             if (notificationBuilder != null) {
+                 notificationBuilder.mActions.clear();
+@@ -318,7 +470,16 @@ public class MediaSessionService extends Service {
              }
  
              if (playbackStateBuilder != null) {
@@ -504,25 +577,33 @@ index e2c1f05..c88c001 100644
              }
              if (notificationStyle != null) {
                  if (compactNotificationActionIndicesIndex > 0) {
-@@ -336,7 +458,7 @@ public class MediaSessionService extends Service {
+@@ -335,8 +496,10 @@ public class MediaSessionService extends Service {
+             notificationUpdate = true;
          }
  
++        if (mediaSession == null) return;
++
          if (playbackStateUpdate && playbackStateBuilder != null) {
 -            playbackStateBuilder.setState(playbackState, position, playbackSpeed);
 +            playbackStateBuilder.setState(playbackState, position, playbackState == PlaybackStateCompat.STATE_PLAYING ? playbackSpeed : 0.0F);
              mediaSession.setPlaybackState(playbackStateBuilder.build());
              playbackStateUpdate = false;
          }
-@@ -353,7 +475,8 @@ public class MediaSessionService extends Service {
+@@ -353,8 +516,12 @@ public class MediaSessionService extends Service {
          }
  
          if (notificationUpdate && notificationBuilder != null && notificationManager != null) {
 -            notificationBuilder.setContentTitle(title).setContentText(artist + " - " + album).setLargeIcon(artwork);
+-            notificationManager.notify(NOTIFICATION_ID, notificationBuilder.build());
 +            notificationBuilder.setContentTitle(title).setContentText(artist + " - " + album).setLargeIcon(artwork)
 +                .setOngoing(playbackState == PlaybackStateCompat.STATE_PLAYING);
-             notificationManager.notify(NOTIFICATION_ID, notificationBuilder.build());
++            notificationHandler.removeCallbacks(postNotification);
++            long wait = lastNotificationPost + 500 - android.os.SystemClock.uptimeMillis();
++            if (wait > 0) notificationHandler.postDelayed(postNotification, wait);
++            else notificationHandler.post(postNotification);
              notificationUpdate = false;
          }
+     }
 diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/res/drawable/ic_baseline_star_24.xml b/node_modules/@capgo/capacitor-media-session/android/src/main/res/drawable/ic_baseline_star_24.xml
 new file mode 100644
 index 0000000..52d8bf9

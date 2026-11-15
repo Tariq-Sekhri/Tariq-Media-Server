@@ -100,6 +100,8 @@ export type WatchPlayerControlsProps = {
   onMiniplayer?: () => void;
   playbackRate?: number;
   onSetPlaybackRate?: (rate: number) => void;
+  /** The Watch Together control, when this player can join a room. */
+  watchTogether?: ReactNode;
 };
 
 export default function WatchPlayerControls({
@@ -183,6 +185,7 @@ export default function WatchPlayerControls({
   onMiniplayer,
   playbackRate = 1,
   onSetPlaybackRate,
+  watchTogether,
 }: WatchPlayerControlsProps) {
   const volumeLabel = volumeLabelFromSlider(muted ? 0 : volume);
   const [volumeAdjusting, setVolumeAdjusting] = useState(false);
@@ -277,6 +280,7 @@ export default function WatchPlayerControls({
           <input {...volumeSliderInteraction} className="watch-volume watch-volume-inline wctl-bar-t6" style={volumeSliderStyle(muted ? 0 : volume)} aria-label="Volume" aria-valuetext={volumeLabel} type="range" min="0" max={VOLUME_SLIDER_MAX} step="0.01" value={muted ? 0 : volume} onChange={(event) => onSetVolumeLevel(Number(event.target.value))} />
 
         </div>}
+        {watchTogether}
         <div className="watch-settings wctl-bar-t0">
           {settingsMenuOpen && <div className="watch-settings-menu" role="menu" aria-label="Playback settings" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
             <div className="watch-settings-title">Settings</div>

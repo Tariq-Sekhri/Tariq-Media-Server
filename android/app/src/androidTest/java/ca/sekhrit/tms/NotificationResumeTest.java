@@ -117,25 +117,40 @@ public class NotificationResumeTest {
         return "data:audio/wav;base64," + Base64.encodeToString(wav.array(), Base64.NO_WRAP);
     }
 
-    @Test public void notificationPlayWakesPausedHiddenPlayerRepeatedly() throws Exception {
+    /** Replaces the app page with a local test document, with no account or server. */
+    private MainActivity openTestDocument() throws Exception {
         Intent intent = new Intent(instrumentation.getTargetContext(), MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         MainActivity activity = (MainActivity) instrumentation.startActivitySync(intent);
         webView = activity.getBridge().getWebView();
-        try {
-            // Use a local test document and tone, with no account or server.
-            String html;
-            try (var injected = activity.getBridge().getLocalServer().getJavaScriptInjectedStream(
-                new java.io.ByteArrayInputStream("<html><head><title>TMS notification test</title></head><body>Notification resume regression test</body></html>".getBytes(java.nio.charset.StandardCharsets.UTF_8)))) {
-                html = new String(injected.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            }
-            instrumentation.runOnMainSync(() -> {
-                webView.stopLoading();
-                webView.setWebViewClient(new com.getcapacitor.BridgeWebViewClient(activity.getBridge()));
-                String origin = activity.getBridge().getServerUrl();
-                if (origin == null) origin = activity.getBridge().getLocalUrl();
-                webView.loadDataWithBaseURL(origin, html, "text/html", "UTF-8", null);
+        String html;
+        try (var injected = activity.getBridge().getLocalServer().getJavaScriptInjectedStream(
+            new java.io.ByteArrayInputStream("<html><head><title>TMS notification test</title></head><body>Notification resume regression test</body></html>".getBytes(java.nio.charset.StandardCharsets.UTF_8)))) {
+            html = new String(injected.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        // The activity's own app load is still in flight here. A script sent
+        // before the test document commits goes to the outgoing document and
+        // its callback is dropped, so evaluate only after the commit.
+        CountDownLatch testDocument = new CountDownLatch(1);
+        instrumentation.runOnMainSync(() -> {
+            webView.stopLoading();
+            webView.setWebViewClient(new com.getcapacitor.BridgeWebViewClient(activity.getBridge()) {
+                @Override public void onPageFinished(WebView view, String url) {
+                    super.onPageFinished(view, url);
+                    if ("TMS notification test".equals(view.getTitle())) testDocument.countDown();
+                }
             });
-            await("document.title === 'TMS notification test' && !!window.Capacitor?.nativeCallback");
+            String origin = activity.getBridge().getServerUrl();
+            if (origin == null) origin = activity.getBridge().getLocalUrl();
+            webView.loadDataWithBaseURL(origin, html, "text/html", "UTF-8", null);
+        });
+        assertTrue("Test document did not load", testDocument.await(15, TimeUnit.SECONDS));
+        await("document.title === 'TMS notification test' && !!window.Capacitor?.nativeCallback");
+        return activity;
+    }
+
+    @Test public void notificationPlayWakesPausedHiddenPlayerRepeatedly() throws Exception {
+        MainActivity activity = openTestDocument();
+        try {
             evaluate("window.audio=new Audio('" + tone() + "'); window.audio.loop=true;"
                 + "window.setState=(s)=>Capacitor.nativePromise('MediaSession','setPlaybackState',{playbackState:s});"
                 + "audio.onplay=()=>setState('playing'); audio.onpause=()=>setState('paused');"
@@ -163,6 +178,57 @@ public class NotificationResumeTest {
             }
         } finally {
             evaluate("window.audio?.pause(); if(window.setState) setState('none'); true");
+            instrumentation.runOnMainSync(activity::finishAndRemoveTask);
+        }
+    }
+
+    /**
+     * Plugin calls rebuild the notification actions on the Capacitor plugin
+     * thread while queued posts build the notification on the main thread.
+     * Unsynchronized, that crashed the app with ConcurrentModificationException.
+     */
+    @Test public void notificationActionUpdatesDoNotRaceNotificationPosts() throws Exception {
+        MainActivity activity = openTestDocument();
+        try {
+            evaluate("for (const a of ['play','pause','previoustrack','nexttrack']) Capacitor.nativeCallback('MediaSession','setActionHandler',{action:a},()=>{});"
+                + "Capacitor.nativePromise('MediaSession','setMetadata',{title:'TMS race test'});"
+                // The plugin binds its service only while a session is active.
+                + "Capacitor.nativePromise('MediaSession','setPlaybackState',{playbackState:'paused'}).then(()=>window.metadataSet=true); true");
+            await("window.metadataSet === true");
+            var plugin = activity.getBridge().getPlugin("MediaSession").getInstance();
+            var serviceField = plugin.getClass().getDeclaredField("service");
+            serviceField.setAccessible(true);
+            long deadline = System.currentTimeMillis() + 10_000;
+            while (serviceField.get(plugin) == null && System.currentTimeMillis() < deadline) Thread.sleep(50);
+            Object service = serviceField.get(plugin);
+            assertNotNull("Media service must be bound", service);
+            var postField = service.getClass().getDeclaredField("postNotification");
+            postField.setAccessible(true);
+            Runnable post = (Runnable) postField.get(service);
+            var updateActions = service.getClass().getMethod("updatePossibleActions");
+            AtomicReference<Throwable> failure = new AtomicReference<>();
+            java.util.concurrent.atomic.AtomicBoolean running = new java.util.concurrent.atomic.AtomicBoolean(true);
+            Thread pluginCalls = new Thread(() -> {
+                try { while (running.get()) updateActions.invoke(service); }
+                catch (Throwable error) { failure.compareAndSet(null, error); }
+            }, "media-session-race");
+            pluginCalls.start();
+            try {
+                long end = System.currentTimeMillis() + 2_000;
+                while (System.currentTimeMillis() < end && failure.get() == null) {
+                    instrumentation.runOnMainSync(() -> {
+                        try { for (int i = 0; i < 50; i++) post.run(); }
+                        catch (Throwable error) { failure.compareAndSet(null, error); }
+                    });
+                }
+            } finally {
+                running.set(false);
+                pluginCalls.join(5_000);
+            }
+            Throwable error = failure.get();
+            if (error != null) throw new AssertionError("Notification post raced an action update", error);
+        } finally {
+            evaluate("Capacitor.nativePromise('MediaSession','setPlaybackState',{playbackState:'none'}); true");
             instrumentation.runOnMainSync(activity::finishAndRemoveTask);
         }
     }

@@ -283,6 +283,49 @@ test('a rejected saved folder grant keeps the location instead of discarding it'
   assert.equal((await setup(db).offlineLocation()).configured, true);
 });
 
+test('background artwork and sync never request expired folder permission, including after reload', async () => {
+  const root = folder('Saved');
+  let requests = 0;
+  root.queryPermission = async () => 'prompt';
+  root.requestPermission = async () => { requests++; return 'granted'; };
+  const art = { ...track('art'), kind: 'image' };
+  const bundle = { ...catalog(root, []), covers: { root: art } };
+  const db = database({ bundles: new Map([['id', bundle]]), settings: new Map([['directory', root]]) });
+  for (let visit = 0; visit < 2; visit++) {
+    const offline = setup(db);
+    await assert.rejects(offline.resolveOfflineFileUrl('id', art.id), /Allow access/);
+    await assert.rejects(offline.reconcileOfflineBundle(bundle, []), /Reconnect/);
+    assert.equal((await offline.offlineLocation()).configured, true);
+  }
+  assert.equal(requests, 0);
+  assert.equal(db.stores.settings.get('directory'), root);
+});
+
+test('reconnecting reuses all owned saved locations once and preserves grants across reload', async () => {
+  let requests = 0;
+  const saved = name => {
+    const root = folder(name);
+    let granted = false;
+    root.queryPermission = async () => granted ? 'granted' : 'prompt';
+    root.requestPermission = async () => { requests++; granted = true; return 'granted'; };
+    return root;
+  };
+  const current = saved('Current'), original = saved('Original'), otherOwner = saved('Other');
+  const db = database({
+    settings: new Map([['directory', current]]),
+    bundles: new Map([
+      ['id', catalog(original, [])],
+      ['second', { ...catalog(original, []), id: 'second' }],
+      ['other', { ...catalog(otherOwner, []), id: 'other', ownerId: 2 }],
+    ]),
+  });
+  await setup(db).reconnectOfflineFolders();
+  assert.equal(requests, 2);
+  await setup(db).reconnectOfflineFolders();
+  assert.equal(requests, 2);
+  assert.equal(db.stores.settings.get('directory'), current);
+});
+
 test('opening offline artwork needs only a read grant, not renewed write permission', async () => {
   const modes = [];
   const root = {

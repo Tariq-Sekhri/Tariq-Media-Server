@@ -110,31 +110,17 @@ const currentOwner = () => {
   return { id: user?.id ?? 0, name: user?.name ?? "User" };
 };
 
-const restoredDirectoryPermissions: FileSystemDirectoryHandle[] = [];
-let directoryPermissionRestores: Promise<void> = Promise.resolve();
 const directoryPermission = async (handle: FileSystemDirectoryHandle, request: boolean, mode: "read" | "readwrite" = "readwrite") => {
   const permissionHandle = handle as FileSystemDirectoryHandle & {
     queryPermission(options: { mode: "read" | "readwrite" }): Promise<PermissionState>;
     requestPermission(options: { mode: "read" | "readwrite" }): Promise<PermissionState>;
   };
   const current = await permissionHandle.queryPermission({ mode });
-  if (current === "granted") return current;
-  if (!request) {
-    // Chromium restores persistent grants through requestPermission after a
-    // stored handle is loaded. A missing grant cannot be prompted in the
-    // background; keep the handle and let a user action authorize it later.
-    if (current !== "prompt") return current;
-    const result = directoryPermissionRestores.then(async () => {
-      for (const restored of restoredDirectoryPermissions) {
-        if (restored === handle || (handle.isSameEntry && await handle.isSameEntry(restored).catch(() => false))) return permissionHandle.queryPermission({ mode });
-      }
-      restoredDirectoryPermissions.push(handle);
-      try { return await permissionHandle.requestPermission({ mode }); }
-      catch { return current; }
-    });
-    directoryPermissionRestores = result.then(() => undefined, () => undefined);
-    return result;
-  }
+  // A restore request can show browser UI even for a previously saved handle.
+  // Background artwork and sync checks must never request permission.
+  if (current === "granted" || !request) return current;
+  // Request the saved handle from an explicit action so supporting browsers
+  // can offer persistent access without opening the folder picker again.
   return permissionHandle.requestPermission({ mode });
 };
 
@@ -582,6 +568,19 @@ export const authorizeOfflineSync = async (bundle: OfflineBundle) => {
   if (Capacitor.isNativePlatform()) return;
   const root = bundle.directoryHandle ?? await storedDirectory();
   if (!root || await directoryPermission(root, true) !== "granted") throw new Error("Allow access to the original offline folder to sync its files.");
+};
+
+export const reconnectOfflineFolders = async () => {
+  if (Capacitor.isNativePlatform()) return;
+  const { bundles } = await listOfflineBundles();
+  const saved = await storedDirectory();
+  const roots = [...(saved ? [saved] : []), ...bundles.flatMap((bundle) => bundle.directoryHandle ? [bundle.directoryHandle] : [])];
+  const authorized: FileSystemDirectoryHandle[] = [];
+  for (const root of roots) {
+    if (await Promise.all(authorized.map((previous) => previous === root || (root.isSameEntry ? root.isSameEntry(previous) : false))).then((matches) => matches.some(Boolean))) continue;
+    if (await directoryPermission(root, true) !== "granted") throw new Error("Allow access to the saved offline folder. You do not need to choose it again.");
+    authorized.push(root);
+  }
 };
 
 export const retryOfflineBundle = async (

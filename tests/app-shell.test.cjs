@@ -185,7 +185,10 @@ test('library navigation stays in the app without playback and supports back/for
   assert.equal(s.b.url(), '/?folder=Other');
   assert.equal(s.b.loads.length, 0, 'browsing with the mini player open stays in the document');
   s.navigateApp('/admin');
-  assert.deepEqual(s.b.loads.at(-1), ['assign', 'http://tms.test/admin']);
+  assert.equal(s.appShellSnapshot().path, '/admin');
+  assert.deepEqual(s.b.loads, [], 'Admin navigation stays in the document too');
+  s.b.window.history.back();
+  assert.equal(s.appShellSnapshot().path, '/?folder=Other');
 });
 
 test('the Android back button only minimizes a full Watch page', () => {

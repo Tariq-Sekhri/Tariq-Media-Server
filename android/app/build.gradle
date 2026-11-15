@@ -1,5 +1,10 @@
 apply plugin: 'com.android.application'
 
+def regressionApp = project.hasProperty('regressionApp')
+if (regressionApp && gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }) {
+    throw new GradleException('Regression configuration is debug-only')
+}
+
 def keystorePropertiesFile = rootProject.file("keystore.properties")
 def keystoreProperties = new Properties()
 if (keystorePropertiesFile.exists()) {
@@ -12,7 +17,7 @@ android {
     namespace = "ca.sekhrit.tms"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "ca.sekhrit.tms"
+        applicationId regressionApp ? "ca.sekhrit.tms.regression" : "ca.sekhrit.tms"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode = (project.findProperty('ciVersionCode') ?: '41').toInteger()
@@ -43,6 +48,25 @@ android {
             }
         }
     }
+}
+
+if (regressionApp) {
+    android.sourceSets.debug.assets.srcDir(layout.buildDirectory.dir('generated/regressionAssets'))
+    def generateRegressionConfig = tasks.register('generateRegressionConfig') {
+        def inputConfig = file('src/main/assets/capacitor.config.json')
+        def outputConfig = layout.buildDirectory.file('generated/regressionAssets/capacitor.config.json')
+        inputs.file(inputConfig)
+        outputs.file(outputConfig)
+        doLast {
+            def config = new groovy.json.JsonSlurper().parse(inputConfig)
+            config.server = (config.server ?: [:]) + [url: 'http://127.0.0.1:3100', cleartext: true, allowNavigation: ['127.0.0.1']]
+            config.plugins = (config.plugins ?: [:]) + [TmsConnection: [localUrl: '', tailscaleUrl: '']]
+            def target = outputConfig.get().asFile
+            target.parentFile.mkdirs()
+            target.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(config))
+        }
+    }
+    tasks.configureEach { if (name == 'mergeDebugAssets') dependsOn(generateRegressionConfig) }
 }
 
 repositories {
