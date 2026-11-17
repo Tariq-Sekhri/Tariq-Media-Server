@@ -14,6 +14,35 @@ const fixtureStamp=await fixtureIdentity();
 let unavailable=false;
 const audioSizes={mp3:(await stat('private/regression-tone.mp3')).size,m4a:(await stat('private/regression-tone.m4a')).size};
 demoBackend().configureServer({middlewares:{use(fn){handlers.push(fn);}}});
+// TMS_REGRESSION_LIBRARY_SIZE adds a synthetic library of that many entries,
+// shaped like a large real one: recursive root listing, thousands of tagged
+// paths and playback records. Names are generic placeholders.
+const bulkSize=Number(process.env.TMS_REGRESSION_LIBRARY_SIZE||0);
+const BULK='Bulk Library';
+const bulk=(()=>{
+  if(!bulkSize)return null;
+  const perFolder=120,folders=Math.max(1,Math.ceil(bulkSize/(perFolder+1))),now=1790000000,entries=[],children=new Map();
+  const tags={},lastAccessed={},playback={},favorites=[];
+  entries.push({path:BULK,device_path:null,name:BULK,kind:'folder',preview_path:null,preview_kind:null,item_count:folders,catalog_kind:null,catalog_title_path:null,size:0,created_at:now,duration:null,thumbnail_aspect_ratio:null});
+  for(let f=0;f<folders&&entries.length<bulkSize;f++){
+    const folder=`${BULK}/Collection ${String(f+1).padStart(4,'0')}`,files=[];
+    entries.push({path:folder,device_path:null,name:folder.split('/').at(-1),kind:'folder',preview_path:`${folder}/clip-0001.mp4`,preview_kind:'video',item_count:perFolder,catalog_kind:null,catalog_title_path:null,size:0,created_at:now-f*600,duration:null,thumbnail_aspect_ratio:null});
+    for(let i=1;i<=perFolder&&entries.length<bulkSize;i++){
+      const video=i%3!==0,path=`${folder}/clip-${String(i).padStart(4,'0')}.${video?'mp4':'jpg'}`;
+      const entry={path,device_path:null,name:path.split('/').at(-1),kind:'file',preview_path:null,preview_kind:null,item_count:null,catalog_kind:null,catalog_title_path:null,size:2000000+i*1000,created_at:now-f*600-i,duration:video?15+i%60:null,thumbnail_aspect_ratio:video?9/16:3/4};
+      entries.push(entry);files.push(entry);
+      const n=entries.length;
+      if(n%3===0)tags[path]=n%2?['Video']:['Video','Saved'];
+      if(n%60===0)lastAccessed[path]=now-n;
+      if(n%65===0)playback[path]={position:5,duration:30,updated:now-n};
+      if(n%1200===0)favorites.push(path);
+    }
+    children.set(folder,files);
+  }
+  children.set(BULK,entries.filter(e=>e.kind==='folder'&&e.path!==BULK));
+  return {entries,children,userState:{tags,last_accessed:lastAccessed,playback,favorites}};
+})();
+const sendJson=(res,value,headers={})=>res.writeHead(200,{'Content-Type':'application/json',...headers}).end(JSON.stringify(value));
 function tone() {
   const rate=16000, samples=rate*12, b=Buffer.alloc(44+samples*2);
   b.write('RIFF'); b.writeUInt32LE(b.length-8,4); b.write('WAVEfmt ',8);
@@ -41,9 +70,14 @@ const server=http.createServer(async(req,res)=>{
     if(url.pathname.startsWith('/media/')&&/\.(mp3|m4a)$/i.test(url.pathname)){const extension=path.extname(url.pathname).slice(1);ranged(req,res,await readFile(`private/regression-tone.${extension}`),extension==='mp3'?'audio/mpeg':'audio/mp4');return;}
     if(url.pathname.startsWith('/media/')&&/\.wav$/i.test(url.pathname)){ranged(req,res,wav,'audio/wav');return;}
     if(url.pathname.startsWith('/media/')&&/\.(mkv|mp4|webm)$/i.test(url.pathname)){ranged(req,res,await readFile('private/regression-media.webm'),'video/webm');return;}
-    if(url.pathname==='/api/library'||url.pathname==='/api/user-state'){
+    const folderParam=url.searchParams.get('folder');
+    if(bulk&&url.pathname==='/api/library'&&folderParam&&(folderParam===BULK||folderParam.startsWith(BULK+'/'))){const page=bulk.children.get(folderParam)||[];sendJson(res,page,{'x-tms-total':String(page.length),'x-tms-has-more':'false','x-tms-consumed':String(page.length)});return;}
+    if(url.pathname==='/api/library'||url.pathname==='/api/user-state'||(bulk&&url.pathname==='/api/libraries')){
       const end=res.end.bind(res);
-      res.end=(body,...args)=>{try{let value=JSON.parse(String(body));if(url.pathname==='/api/user-state')value.playback={};if(Array.isArray(value))value=value.map(entry=>{const extension=path.extname(entry.path||'').slice(1);return audioSizes[extension]?{...entry,size:audioSizes[extension],duration:12}:entry;});return end(JSON.stringify(value),...args);}catch{return end(body,...args);}};
+      res.end=(body,...args)=>{try{let value=JSON.parse(String(body));if(url.pathname==='/api/user-state')value.playback={};
+        if(bulk&&url.pathname==='/api/libraries')value[BULK]={content_type:'mixed',members:[{name:'Demo',can_view:true,can_delete:true,can_move:true,can_create_folders:true,can_upload:true,can_download:true,can_rename:true}],title_folders:[],trickplay_enabled:false,folder_structure_static:false};
+        if(bulk&&url.pathname==='/api/user-state')value={...value,tags:{...value.tags,...bulk.userState.tags},last_accessed:{...value.last_accessed,...bulk.userState.last_accessed},playback:{...bulk.userState.playback},favorites:[...value.favorites,...bulk.userState.favorites]};
+        if(bulk&&url.pathname==='/api/library'&&!folderParam&&!url.searchParams.get('under')&&Array.isArray(value))value=[...value,...bulk.entries];if(Array.isArray(value))value=value.map(entry=>{const extension=path.extname(entry.path||'').slice(1);return audioSizes[extension]?{...entry,size:audioSizes[extension],duration:12}:entry;});return end(JSON.stringify(value),...args);}catch{return end(body,...args);}};
     }
     for(const fn of handlers){let next=false;fn(req,res,()=>{next=true;});if(!next)return;}
     const relative=decodeURIComponent(url.pathname).replace(/^\/+/, '');

@@ -233,16 +233,33 @@ export function previewFrameUrl(videoPath: string, time = 0): string {
   return `${API_BASE}/api/preview-frame?${new URLSearchParams({ video_path: videoPath, time: time.toFixed(2) })}`;
 }
 
+// Tags each folder inherits, cached per tag map: every item in a large
+// library otherwise walks and merges the same ancestor chain again.
+const folderTagCaches = new WeakMap<Record<string, string[]>, Map<string, readonly string[]>>();
+const tagsAtAndAbove = (folder: string, tagsByPath: Record<string, string[]>, cache: Map<string, readonly string[]>): readonly string[] => {
+  const cached = cache.get(folder);
+  if (cached) return cached;
+  const slash = folder.lastIndexOf("/");
+  const above = slash <= 0 ? [] : tagsAtAndAbove(folder.slice(0, slash), tagsByPath, cache);
+  const own = tagsByPath[folder];
+  const tags = own?.length ? [...new Set([...own, ...above])] : above;
+  cache.set(folder, tags);
+  return tags;
+};
+
 export function inheritedTags(path: string | undefined, tagsByPath: Record<string, string[]> | undefined): string[] {
   if (!path || !tagsByPath) return [];
-  const tags = new Set<string>();
-  let current = path.replace(/\\/g, "/").replace(/\/+$/, "");
-  while (current) {
-    tagsByPath[current]?.forEach((tag) => tags.add(tag));
-    const slash = current.lastIndexOf("/");
-    current = slash < 0 ? "" : current.slice(0, slash);
+  const current = path.includes("\\") || path.endsWith("/") ? path.replace(/\\/g, "/").replace(/\/+$/, "") : path;
+  if (!current) return [];
+  let cache = folderTagCaches.get(tagsByPath);
+  if (!cache) {
+    cache = new Map();
+    folderTagCaches.set(tagsByPath, cache);
   }
-  return [...tags];
+  const slash = current.lastIndexOf("/");
+  const above = slash <= 0 ? [] : tagsAtAndAbove(current.slice(0, slash), tagsByPath, cache);
+  const own = tagsByPath[current];
+  return own?.length ? [...new Set([...own, ...above])] : [...above];
 }
 
 export function ancestorTags(path: string | undefined, tagsByPath: Record<string, string[]> | undefined): string[] {
@@ -320,9 +337,42 @@ export function isMovieWatch(details: { kind: string; folder: string; series?: s
   return false;
 }
 
+type FolderIndex = { descendants: Map<string, MediaItem[]>; folders: Map<string, MediaItem> };
+const folderIndexes = new WeakMap<readonly MediaItem[], FolderIndex>();
+const noItems: MediaItem[] = [];
+// Per-folder lookups run once per card, so scanning the whole library each
+// time is quadratic on large libraries. Index each item array once instead.
+function folderIndex(items: readonly MediaItem[]): FolderIndex {
+  let index = folderIndexes.get(items);
+  if (index) return index;
+  index = { descendants: new Map(), folders: new Map() };
+  for (const item of items) {
+    if (item.kind === "folder" && item.path && !index.folders.has(item.path)) index.folders.set(item.path, item);
+    let ancestor = item.parent;
+    while (ancestor) {
+      const list = index.descendants.get(ancestor);
+      if (list) list.push(item); else index.descendants.set(ancestor, [item]);
+      const slash = ancestor.lastIndexOf("/");
+      ancestor = slash < 0 ? undefined : ancestor.slice(0, slash);
+    }
+  }
+  folderIndexes.set(items, index);
+  return index;
+}
+
+/** Items whose parent is `path` or below it, in their original order. */
+export function descendantsOfFolder(items: readonly MediaItem[], path: string): MediaItem[] {
+  return folderIndex(items).descendants.get(path) ?? noItems;
+}
+
+/** The first folder item listed at exactly `path`. */
+export function listedFolderAt(items: readonly MediaItem[], path: string): MediaItem | undefined {
+  return folderIndex(items).folders.get(path);
+}
+
 export function seasonNumberForFolder(items: MediaItem[], path: string): number | null {
-  const detected = items
-    .filter((item) => item.kind === "video" && (item.parent === path || item.parent?.startsWith(`${path}/`)))
+  const detected = descendantsOfFolder(items, path)
+    .filter((item) => item.kind === "video")
     .map((item) => episodeNumbers(`${item.parent ?? ""}/${item.name}`)?.season)
     .filter((season): season is number => season !== undefined);
   if (detected.length) {
@@ -345,8 +395,8 @@ export type TitleCollection = {
 // Only folders whose video filenames agree on a season number are seasons;
 // this prevents a soundtrack or featurette directory from masquerading as one.
 export function titleCollectionForFolder(items: MediaItem[], path: string): TitleCollection | null {
-  const descendants = items.filter((item) => item.parent === path || item.parent?.startsWith(`${path}/`));
-  const listedFolder = items.find((item) => item.kind === "folder" && item.path === path);
+  const descendants = descendantsOfFolder(items, path);
+  const listedFolder = listedFolderAt(items, path);
   const previewSeason = listedFolder?.previewKind === "video" && listedFolder.previewPath
     ? episodeNumbers(listedFolder.previewPath)?.season
     : undefined;
@@ -388,12 +438,12 @@ export function titleCollectionSortOrder(collection: TitleCollection | null): nu
 }
 
 export function mediaEvidenceForFolder(items: MediaItem[], path: string) {
-  const descendants = items.filter((item) => item.parent === path || item.parent?.startsWith(`${path}/`));
+  const descendants = descendantsOfFolder(items, path);
   const seasonNumbers = new Set<number>();
   // At the Movies & TV root the paged response contains the title folder
   // itself, not its child folders. Its server preview may still point to an
   // SxxEyy file, which is enough to identify the title as a series.
-  const listedFolder = items.find((item) => item.kind === "folder" && item.path === path);
+  const listedFolder = listedFolderAt(items, path);
   const listedPreviewSeason = listedFolder?.previewKind === "video" && listedFolder.previewPath
     ? episodeNumbers(listedFolder.previewPath)?.season
     : undefined;

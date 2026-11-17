@@ -7528,3 +7528,15 @@ progress.episode-progress::-moz-progress-bar { background: #b6a3ff; }
 .mobile-parent-link .menu-icon,
 .search-result-actions button .menu-icon,
 .rich-notes-toolbar .toolbar-btn .menu-icon { margin: 0; }
+
+/* Toolbar actions are icon-only at every width; labels live in aria-label/title. */
+.unified-layout .toolbar > div:first-child :is(.toolbar-queue, .toolbar-select),
+.unified-layout .folder-tools > button { width: 36px; min-width: 36px; height: 36px; min-height: 36px; padding: 0; display: inline-grid; place-items: center; gap: 0; font-size: 0; }
+.unified-layout .toolbar > div:first-child :is(.toolbar-queue, .toolbar-select) .menu-icon,
+.unified-layout .folder-tools > button .menu-icon { margin: 0; width: 18px; height: 18px; flex: 0 0 18px; }
+@media (max-width: 760px) {
+  .unified-layout .toolbar > div:first-child :is(.toolbar-queue, .toolbar-select),
+  .unified-layout .folder-tools > button { width: 48px; min-width: 48px; height: 48px; min-height: 48px; border-radius: 10px; }
+  .unified-layout .toolbar > div:first-child :is(.toolbar-queue, .toolbar-select) .menu-icon,
+  .unified-layout .folder-tools > button .menu-icon { width: 20px; height: 20px; flex-basis: 20px; }
+}

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRe
 import MobileNavigation from "./MobileNavigation";
 import LibraryPlaybackSettings from "./LibraryPlaybackSettings";
 import { Capacitor } from "@capacitor/core";
-import { API_BASE, ancestorTags, inheritedTags, resolveEpisodeMetadata, apiEntryToMediaItem, episodeNumbers, formatBytes, isMovieWatch, isShowWatch, mediaEvidenceForFolder, mediaUrl, previewFrameUrl, gridThumbUrl, seasonNumberForFolder, stableId, supportedFormats, titleCollectionForFolder, titleCollectionSortOrder, volumeFromSlider, volumeLabelFromSlider, sliderFromVolume, type ApiLibraryEntry, type MediaItem } from "./lib/media";
+import { API_BASE, ancestorTags, inheritedTags, resolveEpisodeMetadata, apiEntryToMediaItem, episodeNumbers, formatBytes, isMovieWatch, isShowWatch, descendantsOfFolder, mediaEvidenceForFolder, mediaUrl, previewFrameUrl, gridThumbUrl, seasonNumberForFolder, stableId, supportedFormats, titleCollectionForFolder, titleCollectionSortOrder, volumeFromSlider, volumeLabelFromSlider, sliderFromVolume, type ApiLibraryEntry, type MediaItem } from "./lib/media";
 import { completeSearchToken, fuzzyMatches, matchesSearchQuery, parseSearchQuery, searchCompletionContext, searchFields } from "./lib/search";
 import { buildSearchSuggestions, canSuggestLibraryPath, searchSuggestionItemPath, type SearchSuggestion, type SuggestionKind } from "./lib/search-suggestions";
 import { offlineFolderCovers } from "./lib/offline-covers";
@@ -22,6 +22,7 @@ import { DEFAULT_PLAYBACK_PREFERENCES, normalizeImageSeconds, playbackPreference
 import { clearBrowseSnapshot, readBrowseSnapshot, restoreBrowseScroll, saveBrowseSnapshot, shouldDeferLibraryRefetch, updateSnapshotScroll } from "./lib/browse-cache";
 import { readCachedAspectRatio, readCachedThumbFrame, writeCachedAspectRatio, writeCachedThumbFrame } from "./lib/thumb-cache";
 import { useViewportMedia } from "./lib/use-viewport-load";
+import { useDragScroll } from "./lib/use-drag-scroll";
 import { reportImageResult } from "./lib/image-metrics";
 import { applyVideoPreviewTime, ensureFrameAt, playPreviewFromStart, resetPreviewFrame, stopVideoPreview, waitForMetadata } from "./lib/video-preview";
 import { mainNavigation } from "./lib/navigation";
@@ -121,6 +122,23 @@ const fileNameExtension = (name: string) => {
   const extensionIndex = name.lastIndexOf(".");
   return extensionIndex > 0 ? name.slice(extensionIndex) : "";
 };
+// Latest timestamp recorded strictly below each folder, built once per
+// user-state object instead of scanning it for every folder card.
+const latestBelowCache = new WeakMap<object, Map<string, number>>();
+const latestBelow = <T,>(records: Record<string, T>, timestampOf: (record: T) => number) => {
+  let latest = latestBelowCache.get(records);
+  if (latest) return latest;
+  latest = new Map<string, number>();
+  for (const [path, record] of Object.entries(records)) {
+    const timestamp = timestampOf(record);
+    for (let slash = path.lastIndexOf("/"); slash > 0; slash = path.lastIndexOf("/", slash - 1)) {
+      const folder = path.slice(0, slash);
+      if (timestamp > (latest.get(folder) ?? 0)) latest.set(folder, timestamp);
+    }
+  }
+  latestBelowCache.set(records, latest);
+  return latest;
+};
 const openedTimestamp = (item: MediaItem, lastAccessed: Record<string, number>, playback: Record<string, PlaybackState>) => {
   // Recent is for items the user actually opened or played. Do not use the
   // added date as a fallback, or every new library item becomes "recent".
@@ -129,12 +147,8 @@ const openedTimestamp = (item: MediaItem, lastAccessed: Record<string, number>, 
   // A title card represents the media underneath it. Opening Monarch's
   // episode must therefore update Monarch's Last opened position, even
   // though the episode—not the folder—is what is persisted in user state.
-  const descendantAccessed = folderPrefix
-    ? Object.entries(lastAccessed).reduce((latest, [path, timestamp]) => path.startsWith(folderPrefix) ? Math.max(latest, timestamp) : latest, 0)
-    : 0;
-  const descendantPlayed = folderPrefix
-    ? Object.entries(playback).reduce((latest, [path, state]) => path.startsWith(folderPrefix) ? Math.max(latest, state.updated) : latest, 0)
-    : 0;
+  const descendantAccessed = folderPrefix ? latestBelow(lastAccessed, (timestamp) => timestamp).get(item.path) ?? 0 : 0;
+  const descendantPlayed = folderPrefix ? latestBelow(playback, (state) => state.updated).get(item.path) ?? 0 : 0;
   const timestamp = Math.max(lastAccessed[item.path] ?? 0, playback[item.path]?.updated ?? 0, descendantAccessed, descendantPlayed);
   return timestamp > 0 ? timestamp : undefined;
 };
@@ -1212,6 +1226,7 @@ export default function Home() {
     if (typeof window === "undefined") return "";
     return new URLSearchParams(window.location.search).get("q") ?? "";
   });
+  const tagStripDragScroll = useDragScroll<HTMLDivElement>();
   const [activeTags, setActiveTags] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     const params = new URLSearchParams(window.location.search);
@@ -2817,10 +2832,12 @@ export default function Home() {
   const searchSuggestionsPanel = useRef<HTMLDivElement>(null);
   useEffect(() => { if (searchSuggestionsPanel.current) searchSuggestionsPanel.current.scrollTop = 0; }, [query, searchCaret]);
   const completionContext = searchCompletionContext(query, searchCaret);
-  const allSearchSuggestions = useMemo(() => buildSearchSuggestions({
+  // Suggestions scan the whole library, so build them only while the search
+  // box is open.
+  const allSearchSuggestions = useMemo(() => !searchFocused ? [] : buildSearchSuggestions({
     query, caret: searchCaret, items: [...items, ...Object.values(sidebarTreeEntries).flat()],
     libraries, user: sessionUser, previousSearches, recentFolders,
-  }), [items, libraries, previousSearches, query, recentFolders, searchCaret, sessionUser, sidebarTreeEntries]);
+  }), [items, libraries, previousSearches, query, recentFolders, searchCaret, searchFocused, sessionUser, sidebarTreeEntries]);
   const searchSuggestions = compactScreen ? allSearchSuggestions.filter(suggestion => query.trim() || suggestion.kind === "search" || suggestion.kind === "folder").slice(0, 5) : allSearchSuggestions;
   useEffect(() => {
     if (selectedSuggestion) document.getElementById(`suggestion-${selectedSuggestion}`)?.scrollIntoView({ block: "nearest" });
@@ -4677,7 +4694,7 @@ export default function Home() {
   };
   const folderPath = (folder: MediaItem) => mediaPath(folder) ?? folder.name;
   const automaticFolderCover = (path: string) => {
-    const candidates = items.filter((item) => (item.kind === "image" || item.kind === "video") && item.src && (item.parent === path || item.parent?.startsWith(`${path}/`)));
+    const candidates = descendantsOfFolder(items, path).filter((item) => (item.kind === "image" || item.kind === "video") && item.src);
     return candidates.length ? candidates[stableId(`cover:${path}`) % candidates.length] : null;
   };
   const refreshLibraryEntries = async (targetFolder = currentFolder) => {
@@ -7001,7 +7018,7 @@ export default function Home() {
                 )}
               {section === "library" && currentFolder && (canCreateFolderHere || canUploadHere || canServerDownloadHere) && (
                 <div className="folder-tools">
-                  <button type="button" aria-label="Add media" aria-expanded={folderToolsOpen} aria-controls="folder-tools-menu" onClick={() => setFolderToolsOpen(!folderToolsOpen)}><MenuIcon name="plus" /><span className="folder-tools-label">Add media</span></button>
+                  <button type="button" aria-label="Add media" title="Add media" aria-expanded={folderToolsOpen} aria-controls="folder-tools-menu" onClick={() => setFolderToolsOpen(!folderToolsOpen)}><MenuIcon name="plus" /></button>
                   {folderToolsOpen && <div id="folder-tools-menu" role="dialog" aria-modal="false" aria-label="Add media" className="folder-tools-menu" onClick={(event) => { if ((event.target as HTMLElement).closest("button")) setFolderToolsOpen(false); }}>
                   {!currentLibrary?.folder_structure_static && <button
                     className="toolbar-create"
@@ -7097,8 +7114,7 @@ export default function Home() {
           {!isPlaylistOverview && section !== "notes" && section !== "discover" && (
           <div className={`browse-controls${section === "offline" && !selectionMode ? " !grid !grid-cols-[auto_minmax(0,1fr)] !items-center !gap-2" : ""}`}>
                 {!isPlaylistOverview && section !== "notes" && section !== "discover" && (section === "offline" || section === "playlists" ? visible.length > 0 && filterTags.length > 1 : currentLibraryType !== "movies_tv" && !activeSearch.trim() && filterTags.length > 1) && (
-                  <div className={`tag-strip${section === "offline" && !selectionMode ? " !col-start-2 !row-start-1 !w-max !max-w-full !min-w-0 !justify-self-end !flex-nowrap !overflow-x-auto !m-0 !p-0 ![mask-image:none]" : ""}`}>
-                    <span>Filter by</span>
+                  <div className={`tag-strip${section === "offline" && !selectionMode ? " !col-start-2 !row-start-1 !w-max !max-w-full !min-w-0 !justify-self-end !flex-nowrap !overflow-x-auto !m-0 !p-0 ![mask-image:none]" : ""}`} {...tagStripDragScroll}>
                     {filterTags.map((item) => (
                       <button
                         key={item}
@@ -7202,16 +7218,20 @@ export default function Home() {
                   <button
                     className="toolbar-queue"
                     type="button"
+                    aria-label="Play all"
+                    title="Play all"
                     onClick={() => playVisibleQueue(false)}
                   >
-                    <MenuIcon name="play" />Play all
+                    <MenuIcon name="play" />
                   </button>
                   <button
                     className="toolbar-queue"
                     type="button"
+                    aria-label="Shuffle"
+                    title="Shuffle"
                     onClick={() => playVisibleQueue(true)}
                   >
-                    <MenuIcon name="shuffle" />Shuffle
+                    <MenuIcon name="shuffle" />
                   </button>
                 </>
               )}
@@ -7231,9 +7251,11 @@ export default function Home() {
                 <button
                   className="toolbar-select"
                   type="button"
+                  aria-label="Select"
+                  title="Select"
                   onClick={() => enterSelectionMode()}
                 >
-                  ☑ Select
+                  <MenuIcon name="select" />
                 </button>
               )}
                 </>

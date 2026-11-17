@@ -61,7 +61,10 @@ export const saveBrowseSnapshot = (snapshot: Omit<BrowseSnapshot, "savedAt">) =>
   inMemoryBrowseSnapshot = fullSnapshot;
   forgetSnapshotOnAccountChange();
   if (typeof window === "undefined") return;
-  if (fullSnapshot.items.length > MAX_SESSION_SNAPSHOT_ITEMS) {
+  // The sidebar tree can hold the whole library even when the open folder is
+  // small; serializing it on every folder change freezes large libraries.
+  const sidebarItems = Object.values(fullSnapshot.sidebarTreeEntries ?? {}).reduce((total, entries) => total + entries.length, 0);
+  if (fullSnapshot.items.length > MAX_SESSION_SNAPSHOT_ITEMS || sidebarItems > MAX_SESSION_SNAPSHOT_ITEMS) {
     try {
       sessionStorage.removeItem(BROWSE_SNAPSHOT_KEY);
       sessionStorage.removeItem(BROWSE_SCROLL_KEY);

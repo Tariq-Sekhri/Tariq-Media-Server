@@ -27,6 +27,28 @@ export const offlinePathCandidates = (path?: string, relativePath?: string, bund
   return candidates;
 };
 
+// Normalized paths grouped by their last segment, built once per source
+// object. Matching every offline file against a large library by scanning
+// all of its paths is otherwise quadratic.
+const pathsByNameCache = new WeakMap<object, Map<string, string[]>>();
+const noPaths: string[] = [];
+const pathsNamed = <T extends object>(source: T, keysOf: (source: T) => Iterable<string>, name: string) => {
+  let index = pathsByNameCache.get(source);
+  if (!index) {
+    index = new Map();
+    for (const key of keysOf(source)) {
+      const normalized = normalizePath(key);
+      const slash = normalized.lastIndexOf("/");
+      if (slash < 0) continue;
+      const last = normalized.slice(slash + 1);
+      const list = index.get(last);
+      if (list) list.push(normalized); else index.set(last, [normalized]);
+    }
+    pathsByNameCache.set(source, index);
+  }
+  return index.get(name) ?? noPaths;
+};
+
 export const resolveOfflineUserMeta = ({
   path,
   relativePath,
@@ -50,17 +72,9 @@ export const resolveOfflineUserMeta = ({
   // server-side favorites and tags can still be matched by filename.
   const name = (path ?? relativePath) ? normalizePath(path ?? relativePath ?? "").split("/").pop() : undefined;
   if (name) {
-    for (const key of Object.keys(customTags)) {
-      if (normalizePath(key).endsWith(`/${name}`)) candidates.push(normalizePath(key));
-    }
-    for (const key of favoritePaths) {
-      if (normalizePath(key).endsWith(`/${name}`)) candidates.push(normalizePath(key));
-    }
-    if (libraryByPath) {
-      for (const key of libraryByPath.keys()) {
-        if (normalizePath(key).endsWith(`/${name}`)) candidates.push(normalizePath(key));
-      }
-    }
+    candidates.push(...pathsNamed(customTags, Object.keys, name));
+    candidates.push(...pathsNamed(favoritePaths, (paths) => paths, name));
+    if (libraryByPath) candidates.push(...pathsNamed(libraryByPath, (library) => library.keys(), name));
   }
   const unique = [...new Set(candidates)];
   let tags = kind === "folder" ? [] : [builtInTag(kind)].filter(Boolean);
