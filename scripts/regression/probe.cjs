@@ -5,6 +5,9 @@ async function probe(scenario) {
   const startedAtUtcMs = Date.now();
   const target = document.querySelector(scenario.clickSelector);
   if (!target || target.disabled || !target.getClientRects().length) return {status:'blocked', reason:'target-unavailable'};
+  const preparedAudio = scenario.kind === 'audio' && scenario.verifyAudioSamples
+    ? [...document.querySelectorAll('[data-audio-preload] audio')].find(a=>a.src.includes(scenario.sourceIncludes))
+    : null;
   const result = () => {
     const root=scenario.shadowHostSelector?document.querySelector(scenario.shadowHostSelector)?.shadowRoot:document;
     if(scenario.shadowHostSelector&&root){return [...root.querySelectorAll(scenario.resultSelector)].find(e=>(e.currentSrc||e.src||'').includes(scenario.sourceIncludes)&&!e.paused)||root.querySelector(scenario.resultSelector);}
@@ -45,8 +48,10 @@ async function probe(scenario) {
       if (scenario.kind === 'image' && el.complete && el.naturalWidth > 0 && el.naturalHeight > 0 && visible(el)) {
         try { await el.decode(); if (sourceMatches(el) && visible(el)) return {status:'ok', ms:performance.now()-start, level:'decoded-visible-dom'}; } catch {}
       }
-      if (scenario.kind === 'audio' && !el.paused && !el.error && el.readyState >= 3) {
+      if (scenario.kind === 'audio' && !el.paused && !el.seeking && !el.error && el.readyState >= 3) {
         const src = el.currentSrc || el.src;
+        if (!first || first.el !== el || first.src !== src) first = {el,src,time:el.currentTime,onset:null};
+        if (first.onset === null && el.currentTime > first.time) first.onset = performance.now()-start;
         if(scenario.verifyAudioSamples&&!sampleMonitor){
           if(typeof el.captureStream!=='function'||!window.AudioContext)return {status:'blocked',reason:'audio-sample-capture-unavailable'};
           const context=new AudioContext(),stream=el.captureStream(),analyser=context.createAnalyser(),sink=context.createGain();
@@ -56,9 +61,14 @@ async function probe(scenario) {
         }
         if (first && first.el === el && first.src === src && el.currentTime > first.time + (scenario.minimumAdvanceSeconds || 0.1)) {
           if(sampleMonitor){const samples=new Float32Array(2048);sampleMonitor.analyser.getFloatTimeDomainData(samples);let real=0,imaginary=0,energy=0;for(let i=0;i<samples.length;i++){const angle=2*Math.PI*440*i/sampleMonitor.context.sampleRate;real+=samples[i]*Math.cos(angle);imaginary+=samples[i]*Math.sin(angle);energy+=samples[i]*samples[i];}if(energy/samples.length<1e-10||2*(real*real+imaginary*imaginary)/(samples.length*energy)<.45){await new Promise(r=>setTimeout(r,25));continue;}sampleMonitor.stream.getTracks().forEach(t=>t.stop());await sampleMonitor.context.close();}
-          return {status:'ok', ms:performance.now()-start, startedAtUtcMs, level:sampleMonitor?'client-decoded-fixture-tone':'audio-timeline',audioSamplesVerified:!!sampleMonitor,audibleOutput:'unverified'};
+          const sampleVerificationMs = performance.now()-start;
+          // Capture adds its own buffering. Time the start of media-clock
+          // movement, then require continued progress and the expected tone.
+          return {status:'ok', ms:sampleMonitor?first.onset:sampleVerificationMs,
+            ...(sampleMonitor?{sampleVerificationMs}:{}), preparedAudioReused:el===preparedAudio, startedAtUtcMs,
+            level:sampleMonitor?'audio-start-with-verified-samples':'audio-timeline',
+            audioSamplesVerified:!!sampleMonitor,audibleOutput:'unverified'};
         }
-        if (!first || first.el !== el || first.src !== src) first = {el,src,time:el.currentTime};
       }
       const display=scenario.displaySelector ? document.querySelector(scenario.displaySelector) : el;
       if (scenario.kind === 'video' && !el.paused && !el.error && el.readyState >= 2 && display && visible(display,scenario.verifyPixels) && typeof el.requestVideoFrameCallback === 'function') {
@@ -84,8 +94,8 @@ async function probe(scenario) {
       }
       if (scenario.kind === 'element' && visible(el)) return {status:'ok', ms:performance.now()-start, level:'visible-dom'};
     }
-    if (!el || (scenario.kind === 'audio' && (el.paused || el.error || !sourceMatches(el)))) first = null;
-    await new Promise(resolve => setTimeout(resolve, 25));
+    if (!el || (scenario.kind === 'audio' && (el.paused || el.seeking || el.error || !sourceMatches(el)))) first = null;
+    await new Promise(resolve => setTimeout(resolve, scenario.verifyAudioSamples && first?.onset == null ? 8 : 25));
   }
   frame = null;
   if(sampleMonitor){sampleMonitor.stream.getTracks().forEach(t=>t.stop());await sampleMonitor.context.close();}

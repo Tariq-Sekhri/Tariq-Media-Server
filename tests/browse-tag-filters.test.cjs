@@ -41,7 +41,7 @@ const compiled = ts.transpileModule(`
 `, { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }).outputText;
 const moduleUnderTest = { exports: {} };
 vm.runInNewContext(compiled, {
-  module: moduleUnderTest, React, browseTagFilters, inheritedTags: media.inheritedTags,
+  module: moduleUnderTest, React, browseTagFilters, inheritedTags: media.inheritedTags, tagStripDragScroll: {},
 });
 
 const folder = 'Music/Sample Album';

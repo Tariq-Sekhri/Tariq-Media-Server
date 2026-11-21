@@ -9,11 +9,21 @@ const root=path.join('private','regression-runs',String(Date.now()));await mkdir
 const results=[];let fixture;let fixtureLog;let ownsReverse=false;
 const adb=(...a)=>execFileSync('adb',['-s',serial,...a],{encoding:'utf8'}).trim();
 async function command(name,exe,argv){const file=path.join(root,name+'.log'),fd=openSync(file,'w');const code=await new Promise((resolve,reject)=>{const child=spawn(exe,argv,{stdio:['ignore',fd,fd],windowsHide:true});child.once('error',reject);child.once('exit',resolve);}).finally(()=>closeSync(fd));if(code!==0)throw Error(`${name} exited ${code}; see ${file}`);return {file,text:await readFile(file,'utf8')};}
-async function check(name,run){console.log('Running '+name);try{const detail=await run();const {text:log,...report}=detail||{};results.push({name,status:'pass',...report});}catch(error){results.push({name,status:'fail',reason:error.message});}console.log(JSON.stringify(results.at(-1)));return results.at(-1).status==='pass';}
+async function check(name,run){
+  console.log('Running '+name);
+  const started=performance.now();
+  let result;
+  try{const {text:log,...report}=await run()||{};result={name,status:'pass',...report};}
+  catch(error){result={name,status:'fail',reason:error.message};}
+  result.durationMs=Math.round(performance.now()-started);
+  results.push(result);
+  console.log(JSON.stringify(result));
+  return result.status==='pass';
+}
 const node=(name,file,extra=[])=>command(name,process.execPath,[file,...extra]);
 // Each launched stage starts from a fresh QA process, not whatever screen or
 // WebView the previous stage left behind.
-async function launch(){adb('shell','am','force-stop','ca.sekhrit.tms.regression');adb('shell','am','start','-W','-f','0x10008000','-n','ca.sekhrit.tms.regression/ca.sekhrit.tms.TmsConnectionActivity');await node('fixture-sign-in','scripts/regression/prepare.mjs',[serial,'open']);}
+function launch(){adb('shell','am','force-stop','ca.sekhrit.tms.regression');adb('shell','am','start','-W','-f','0x10008000','-n','ca.sekhrit.tms.regression/ca.sekhrit.tms.TmsConnectionActivity');}
 try {
   await check('node-contracts',async()=>command('node-contracts',process.execPath,['--test',...(await readdir('tests')).filter(f=>f.endsWith('.test.cjs')).map(f=>'tests/'+f)]));
   await check('rust-contracts',async()=>command('rust-contracts','cargo',['test','--manifest-path','backend/Cargo.toml']));
@@ -33,10 +43,11 @@ try {
   const reverse=adb('reverse','--list').split(/\r?\n/).map(line=>line.trim().split(/\s+/)).find(parts=>parts[1]==='tcp:3100');
   if(reverse)assert.equal(reverse[2],'tcp:3100','Fixture port is already mapped elsewhere');
   else {adb('reverse','tcp:3100','tcp:3100');ownsReverse=true;}
-  await check('android-integration',async()=>{const r=await command('android-integration','adb',['-s',serial,'shell','am','instrument','-w','-r','-e','class','ca.sekhrit.tms.NativeLifecycleRegressionTest,ca.sekhrit.tms.NotificationResumeTest,ca.sekhrit.tms.OfflineContentTest,ca.sekhrit.tms.PlayerNotificationRegressionTest','ca.sekhrit.tms.regression.test/androidx.test.runner.AndroidJUnitRunner']);assert.ok(/OK \(9 tests\)/.test(r.text)&&!/FAILURES!!!|Process crashed|INSTRUMENTATION_FAILED/.test(r.text),'Android test assertions failed');return {file:r.file};});
-  await launch();await check('client-journeys',()=>node('client-journeys','scripts/regression/journeys.mjs',[serial]));
+  const integrationPassed=await check('android-integration',async()=>{const r=await command('android-integration','adb',['-s',serial,'shell','am','instrument','-w','-r','-e','class','ca.sekhrit.tms.NativeLifecycleRegressionTest,ca.sekhrit.tms.NotificationResumeTest,ca.sekhrit.tms.OfflineContentTest,ca.sekhrit.tms.PlayerNotificationRegressionTest','ca.sekhrit.tms.regression.test/androidx.test.runner.AndroidJUnitRunner']);assert.ok(/OK \(9 tests\)/.test(r.text)&&!/FAILURES!!!|Process crashed|INSTRUMENTATION_FAILED/.test(r.text),`Android integration failed; see ${r.file}`);return {file:r.file};});
+  if(!integrationPassed)await command('android-integration-logcat','adb',['-s',serial,'logcat','-d','-t','800','AndroidRuntime:V','TestRunner:V','lowmemorykiller:I','TmsRegression:V','*:S']).catch(error=>console.warn(error.message));
+  launch();await check('client-journeys',()=>node('client-journeys','scripts/regression/journeys.mjs',[serial]));
   await check('offline-lifecycle',()=>node('offline-lifecycle','scripts/regression/offline-journey.mjs',[serial]));
-  await launch();
+  launch();await node('fixture-sign-in','scripts/regression/prepare.mjs',[serial,'open']);
   await check('client-performance',()=>node('client-performance','scripts/regression/run.mjs',['--serial',serial,'--config','scripts/regression/scenarios.json','--screenshots','true','--output',path.join(root,'performance.json'),...(args.get('--baseline')?['--baseline',args.get('--baseline')]:['--capture-baseline',path.join(root,'baseline.json')])]));
 }catch(error){results.push({name:'setup',status:'fail',reason:error.message});}
 finally {

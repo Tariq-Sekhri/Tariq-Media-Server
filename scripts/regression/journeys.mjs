@@ -1,4 +1,4 @@
-import {attach} from './cdp.mjs';
+import {attach,openFixturePage} from './cdp.mjs';
 import {writeFile,mkdir} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
@@ -8,9 +8,9 @@ let c=await attach(serial,packageName);
 const results=[];
 const evaluate=expression=>c.evaluate(expression);
 const adb=(...args)=>execFileSync('adb',['-s',serial,...args],{encoding:'utf8'}).trim();
-async function wait(expression,timeout=7000){const end=Date.now()+timeout;while(Date.now()<end){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,60));}throw Error('Expected client state was not reached');}
-async function page(pathname){await c.call('Page.navigate',{url:'http://127.0.0.1:3100'+pathname});await wait(`!!document.querySelector('a.card-label-link, .main-workspace, .watch-page')`);}
-async function click(selector){await wait(`[...document.querySelectorAll(${JSON.stringify(selector)})].some(e=>{const r=e.getBoundingClientRect();return !e.disabled&&r.width>0&&r.height>0})`);const r=await c.call('Runtime.evaluate',{expression:`(()=>{const e=[...document.querySelectorAll(${JSON.stringify(selector)})].find(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0});if(!e||e.disabled)return false;e.click();return true;})()`,returnByValue:true,userGesture:true});assert.equal(r.result?.value,true,'Expected usable app control');}
+async function wait(expression,timeout=7000){const end=Date.now()+timeout;while(Date.now()<end){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,60));}throw Error('Expected client state was not reached: '+expression);}
+const page=pathname=>openFixturePage(c,pathname);
+async function click(selector){await wait(`[...document.querySelectorAll(${JSON.stringify(selector)})].some(e=>{const r=e.getBoundingClientRect();return !e.disabled&&r.width>0&&r.height>0})`);const r=await c.call('Runtime.evaluate',{expression:`(()=>{const e=[...document.querySelectorAll(${JSON.stringify(selector)})].find(e=>{const r=e.getBoundingClientRect();return !e.disabled&&r.width>0&&r.height>0});if(!e)return false;e.click();return true;})()`,returnByValue:true,userGesture:true});assert.equal(r.result?.value,true,'Expected usable app control');}
 async function check(id,description,run){if(process.argv[3]&&process.argv[3]!==id)return;try{await run();results.push({id,description,status:'pass'});}catch(error){results.push({id,description,status:'fail',reason:error.message});}console.log(JSON.stringify(results.at(-1)));}
 try{
   await page('/demo');
@@ -32,10 +32,8 @@ try{
       await page('/?folder=Music');
       await evaluate(`localStorage.setItem('tms:library-playback',JSON.stringify({music:{alongside:${alongside}}}))`);
       await page('/?folder=Music');await wait(`document.querySelectorAll('a.card-label-link').length===24`);
-      const selector=action==='tap'?'a.card-label-link[href*="Afterglow.mp3"]':action==='all'?'button[aria-label="Play all media"]':'button[aria-label="Shuffle media"]';
-      if(action==='tap')await click(selector);else{
-        const r=await c.call('Runtime.evaluate',{expression:`(()=>{const e=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()===${JSON.stringify(action==='all'?'Play all':'Shuffle')});if(!e)return false;e.click();return true;})()`,returnByValue:true,userGesture:true});assert.equal(r.result?.value,true);
-      }
+      const selector=action==='tap'?'a.card-label-link[href*="Afterglow.mp3"]':action==='all'?'button[aria-label="Play all"]':'button[aria-label="Shuffle"]';
+      await click(selector);
       await wait(`(()=>{const a=document.querySelector('.miniplayer audio');return a&&!a.paused&&!a.error&&a.currentTime>.15})()`);
       assert.equal(await evaluate('location.pathname'),'/');assert.ok((await evaluate('location.search')).includes('folder=Music'));
       const before=await evaluate(`document.querySelector('.miniplayer audio').currentTime`);

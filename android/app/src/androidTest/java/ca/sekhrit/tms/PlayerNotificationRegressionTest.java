@@ -26,6 +26,19 @@ public class PlayerNotificationRegressionTest {
         while (System.currentTimeMillis() < end) { try { if ("true".equals(evaluate(expression))) return; } catch (AssertionError transientNavigation) { if (System.currentTimeMillis()>=end) throw transientNavigation; } Thread.sleep(100); }
         fail("Player state not reached: " + expression);
     }
+    private double awaitAudioPosition(double minimum) throws Exception {
+        // Capture the position in the same evaluation that checks playback.
+        // PiP dismissal can replace the background audio during the handoff.
+        long deadline = android.os.SystemClock.elapsedRealtime() + 10_000;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
+            String sample = evaluate("(()=>{const audio=document.querySelector('body > audio');"
+                + "return audio && !audio.paused && !audio.error && audio.currentTime > " + minimum
+                + " ? audio.currentTime : null})()");
+            if (sample != null && !sample.equals("null")) return Double.parseDouble(sample);
+            Thread.sleep(100);
+        }
+        throw new AssertionError("Background audio did not advance beyond " + minimum + " seconds");
+    }
     private void notificationAction(String title) throws Exception {
         NotificationManager manager = instrumentation.getTargetContext().getSystemService(NotificationManager.class);
         long end = System.currentTimeMillis() + 5_000;
@@ -95,9 +108,8 @@ public class PlayerNotificationRegressionTest {
             assertFalse("Switch to audio must close PiP in 750 ms",inPip.get());
             android.util.Log.i("TmsRegression","actual_pip_audio_close_ms="+elapsed);
             android.os.Bundle metric=new android.os.Bundle();metric.putLong("pip_audio_close_ms",elapsed);instrumentation.sendStatus(2,metric);
-            await("!!document.querySelector('body > audio') && !document.querySelector('body > audio').paused && document.querySelector('body > audio').currentTime>"+Math.max(.2,before-.5));
-            double position=Double.parseDouble(evaluate("document.querySelector('body > audio').currentTime"));
-            await("document.querySelector('body > audio').currentTime>"+(position+.15));
+            double position = awaitAudioPosition(Math.max(.2, before - .5));
+            awaitAudioPosition(position + .15);
             assertFalse("Audio-only PiP dismissal must leave the activity hidden",activity.hasWindowFocus());
         } finally {evaluate("document.querySelectorAll('audio').forEach(a=>a.pause());true");instrumentation.runOnMainSync(activity::finishAndRemoveTask);}
     }

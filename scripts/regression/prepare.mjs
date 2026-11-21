@@ -1,4 +1,4 @@
-import {attach} from './cdp.mjs';
+import {attach,openFixturePage} from './cdp.mjs';
 import {writeFile} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 const [serial,mode='open']=process.argv.slice(2);
@@ -6,7 +6,7 @@ const packageName=process.env.TMS_REGRESSION_PACKAGE||'ca.sekhrit.tms.regression
 if(packageName!=='ca.sekhrit.tms.regression')throw Error('Fixture operations require the isolated regression app');
 const c=await attach(serial,packageName);
 try {
-  if(mode==='open') await c.call('Page.navigate',{url:'http://127.0.0.1:3100/demo'});
+  if(mode==='open') await openFixturePage(c,'/demo');
   else if(mode==='music')await c.call('Page.navigate',{url:'http://127.0.0.1:3100/?folder=Music'});
   else if(mode==='photos')await c.call('Page.navigate',{url:'http://127.0.0.1:3100/?folder=Family%20Photos%2FBeach%20Trip%202024'});
   else if(mode==='video')await c.call('Page.navigate',{url:'http://127.0.0.1:3100/?folder=Movies%20and%20Shows%2FOrbital%20Drift%2FSeason%201'});

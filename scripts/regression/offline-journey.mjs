@@ -1,6 +1,6 @@
 // Destructive operations are confined to the separate QA package and its
 // explicitly marked fixture folder on an explicitly selected emulator.
-import {attach} from './cdp.mjs';
+import {attach,openFixturePage} from './cdp.mjs';
 import {execFileSync} from 'node:child_process';
 import {writeFile,mkdir} from 'node:fs/promises';
 import assert from 'node:assert/strict';
@@ -10,9 +10,15 @@ const adb=(...args)=>execFileSync('adb',['-s',serial,...args],{encoding:'utf8'})
 let c,created=false;const results=[];
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 async function connect(){c?.close();c=await attach(serial,pkg);}
-async function wait(expression,timeout=15000){const end=Date.now()+timeout;while(Date.now()<end){try{if(await c.evaluate(expression))return;}catch{}await pause(100);}throw Error('Expected offline client state not reached');}
-async function page(pathname){await c.call('Page.navigate',{url:'http://127.0.0.1:3100'+pathname});await wait('!!document.querySelector(".main-workspace, .workspace, .watch-page")');}
+async function wait(expression,timeout=15000){const end=Date.now()+timeout;while(Date.now()<end){try{if(await c.evaluate(expression))return;}catch{}await pause(100);}throw Error('Expected offline client state not reached: '+expression);}
+const page=pathname=>openFixturePage(c,pathname);
 async function clickText(text){const r=await c.call('Runtime.evaluate',{expression:`(()=>{const e=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()===${JSON.stringify(text)}&&e.getBoundingClientRect().height>0);if(!e)return false;e.click();return true})()`,returnByValue:true,userGesture:true});assert.equal(r.result?.value,true,'Missing app action '+text);}
+async function clickOfflineCard(selector){
+  const card=`document.querySelector(${JSON.stringify(selector)})`;
+  await wait(`Boolean(${card}?.getClientRects().length)`,20000);
+  const result=await c.call('Runtime.evaluate',{expression:`(()=>{const card=${card};if(!card?.getClientRects().length)return false;card.click();return true})()`,returnByValue:true,userGesture:true});
+  assert.equal(result.result?.value,true,'Missing offline card '+selector);
+}
 const decode=s=>s.replaceAll('&amp;','&').replaceAll('&quot;','"').replaceAll('&apos;',"'");
 function tree(){const xml=adb('exec-out','uiautomator','dump','/dev/tty');return [...xml.matchAll(/<node\b[^>]*>/g)].map(m=>Object.fromEntries([...m[0].matchAll(/([\w:-]+)="([^"]*)"/g)].map(a=>[a[1],decode(a[2])])));}
 function tap(nodes,pattern){const node=nodes.find(n=>n.enabled!=='false'&&(pattern.test(n.text||'')||pattern.test(n['content-desc']||'')));if(!node)return false;const b=node.bounds?.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);if(!b)return false;adb('shell','input','tap',String(Math.round((+b[1]+ +b[3])/2)),String(Math.round((+b[2]+ +b[4])/2)));return true;}
@@ -94,11 +100,10 @@ try {
   });
   await record('R02-cold','Recovered audio plays after a cold launch with server unavailable',async()=>{
     await control(true);c.close();c=null;adb('shell','am','force-stop',pkg);adb('shell','am','start','-n',pkg+'/ca.sekhrit.tms.TmsConnectionActivity');await connect();
-    await wait(`document.body.innerText.includes('Music')`,20000);
-    await c.evaluate(`(()=>{const e=[...document.querySelectorAll('a.card-label-link,button.media-list-main')].find(e=>e.textContent.includes('Music'));if(!e)throw Error('Recovered folder missing');e.click()})()`);
-    await wait(`!![...document.querySelectorAll('a.card-label-link,button.media-list-main')].find(e=>e.textContent.includes('Afterglow'))`);
-    await c.evaluate(`(()=>{const e=[...document.querySelectorAll('a.card-label-link,button.media-list-main')].find(e=>e.textContent.includes('Afterglow'));e.click()})()`);
-    await wait(`(()=>{const a=document.querySelector('.miniplayer audio');return a&&!a.paused&&a.currentTime>.2&&!a.currentSrc.includes('/media/')})()`);
+    // Cold start may briefly render cached online cards with the same names.
+    await clickOfflineCard('a.card-label-link[href="/?section=offline&folder=Music"]');
+    await clickOfflineCard('a.card-label-link[href*="offlineFile="][href*="Afterglow.mp3"]');
+    await wait(`(()=>{const a=document.querySelector('.miniplayer audio');return a&&!a.paused&&!a.error&&a.currentTime>.2&&a.currentSrc.includes('/_capacitor_content_/')})()`);
     await control(false);
   });
   await record('R28','An unavailable offline folder preserves its grant and catalog without a crash',async()=>{

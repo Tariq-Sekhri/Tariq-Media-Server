@@ -76,6 +76,7 @@ for (const alongside of [false, true]) for (const offline of [false, true]) for 
       const play = handler('app/page.tsx', 'playVideo', {
         ...playback, libraries: {}, sessionUser: { id: 7 }, readPlayback: () => null,
         readLocalWatchProgress: () => ({}), savesWatchProgress: () => true,
+        playbackResumeTime: () => 0,
         window: { location: { pathname: '/', search: offline ? '?section=offline' : '?folder=AudioLibrary' } },
         queueSourceForItem: source => source,
         startPlaybackSession: input => { session.value = { ...input, id: 'session' }; return session.value; },

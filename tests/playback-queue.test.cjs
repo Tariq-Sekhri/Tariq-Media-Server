@@ -150,11 +150,13 @@ function pageFunction(file, name, globals) {
   let declaration;
   const visit = node => {
     if (ts.isVariableDeclaration(node) && node.name.getText(ast) === name) declaration = node;
+    if (ts.isFunctionDeclaration(node) && node.name?.text === name) declaration = node;
     ts.forEachChild(node, visit);
   };
   visit(ast);
   assert.ok(declaration, `${name} exists in the production page`);
-  return vm.runInNewContext(ts.transpileModule(`(${declaration.initializer.getText(ast)})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, {
+  const expression = ts.isFunctionDeclaration(declaration) ? declaration : declaration.initializer;
+  return vm.runInNewContext(ts.transpileModule(`(${expression.getText(ast)})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, {
     URLSearchParams, beginPlaybackTrace: () => ({ id: 'test-attempt', startedAt: 1000 }),
     playbackTracePhase() {}, writePlaybackTrace() {}, ...globals,
   });
@@ -209,10 +211,14 @@ test('production item click queues audio and movies using the view context', () 
 test('production audio click starts a shared mini session without navigating to Watch', () => {
   const entry = item('song', { kind: 'audio' });
   let started, accessed;
-  const play = pageFunction('app/page.tsx', 'playVideo', {
-    playsAlongside: () => false, libraries: {}, sessionUser: { id: 7 }, savesWatchProgress: load('app/lib/watch-progress.ts', {}, { './library-playback': libraryPlayback({ sleep: { startFresh: true } }) }).savesWatchProgress, queueSourceForItem: queue().queueSourceForItem,
+  const progress = {
+    sessionUser: { id: 7 }, savesWatchProgress: load('app/lib/watch-progress.ts', {}, { './library-playback': libraryPlayback({ sleep: { startFresh: true } }) }).savesWatchProgress,
     readPlayback: () => ({ position: 5, duration: 100, updated: 1 }),
     readLocalWatchProgress: () => ({ [entry.path]: { position: 25, duration: 100, updated: 2 } }),
+  };
+  const play = pageFunction('app/page.tsx', 'playVideo', {
+    ...progress, playbackResumeTime: pageFunction('app/page.tsx', 'playbackResumeTime', progress),
+    playsAlongside: () => false, libraries: {}, queueSourceForItem: queue().queueSourceForItem,
     window: { location: { pathname: '/', search: '?folder=Lib', assign() { throw Error('audio must stay in browse'); } } },
     startPlaybackSession: input => { started = input; }, recordAccess: path => { accessed = path; },
   });

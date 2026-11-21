@@ -1,5 +1,27 @@
 import {execFileSync} from 'node:child_process';
 import assert from 'node:assert/strict';
+
+export async function openFixturePage(c, pathname) {
+  const fixture = 'http://127.0.0.1:3100';
+  const requested = new URL(pathname, fixture);
+  assert.equal(requested.origin, fixture, 'Navigation must stay on the regression fixture');
+  const destination = requested.pathname === '/demo' ? new URL('/', fixture) : requested;
+  // The app can add saved sort and filter choices after navigation.
+  const params = JSON.stringify([...destination.searchParams]);
+  const previous = await c.evaluate('performance.timeOrigin');
+  await c.call('Page.navigate', {url: requested.href});
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    if (await c.evaluate(`performance.timeOrigin!==${previous}
+      && location.origin===${JSON.stringify(fixture)}
+      && location.pathname===${JSON.stringify(destination.pathname)}
+      && ${params}.every(([key,value])=>new URLSearchParams(location.search).getAll(key).includes(value))
+      && !!document.querySelector('.workspace, .watch-page')`)) return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw Error('Fixture page did not open: ' + pathname);
+}
+
 export async function attach(serial,packageName='ca.sekhrit.tms.regression') {
   assert.ok(serial, 'Explicit emulator serial required');
   const adb=(...args)=>execFileSync('adb',['-s',serial,...args],{encoding:'utf8'}).trim();

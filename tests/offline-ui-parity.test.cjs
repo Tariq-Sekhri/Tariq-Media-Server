@@ -22,6 +22,7 @@ const normalize = (line) => line.trim().replace(/\s+/g, ' ');
 // `count` of them. Keep a reason
 // that explains why the server is required; otherwise share the online code.
 const OFFLINE_DIFFERENCES = [
+  { file: 'app/page.tsx', match: 'const audioPreloadOwner = (backendState === "online" || backendState === "cached")', count: 1, reason: 'Only streamed audio uses speculative network requests. Downloaded audio uses the same player with its device source.' },
   { file: 'app/page.tsx', match: '<MobileNavigation active={adminRoute || section === "trash" ? "admin" : section}', count: 1, reason: 'The shared mobile navigation hides server-only destinations while disconnected, matching the desktop navigation; downloaded media and queued favorites remain available.' },
   { file: 'app/page.tsx', match: '{backendState !== "offline" && <button', count: 1, reason: 'Creating a shared room requires the server.' },
   { file: 'app/page.tsx', match: '{(visibleBackgroundMagnetDownloads.length > 0 || (backendState !== "offline" && !adminRoute)) && (', count: 1, reason: 'Room listings require connectivity; downloads retain their own status.' },

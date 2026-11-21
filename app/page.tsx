@@ -22,6 +22,7 @@ import { DEFAULT_PLAYBACK_PREFERENCES, normalizeImageSeconds, playbackPreference
 import { clearBrowseSnapshot, readBrowseSnapshot, restoreBrowseScroll, saveBrowseSnapshot, shouldDeferLibraryRefetch, updateSnapshotScroll } from "./lib/browse-cache";
 import { readCachedAspectRatio, readCachedThumbFrame, writeCachedAspectRatio, writeCachedThumbFrame } from "./lib/thumb-cache";
 import { useViewportMedia } from "./lib/use-viewport-load";
+import { discardPreparedAudio, setViewportAudio } from "./lib/audio-preload";
 import { useDragScroll } from "./lib/use-drag-scroll";
 import { reportImageResult } from "./lib/image-metrics";
 import { applyVideoPreviewTime, ensureFrameAt, playPreviewFromStart, resetPreviewFrame, stopVideoPreview, waitForMetadata } from "./lib/video-preview";
@@ -1009,6 +1010,7 @@ function MixedMediaListRow({
   };
   return (
     <article
+      data-viewport-audio={item.kind === "audio" ? item.id : undefined}
       draggable={canMove && !selectionMode}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -3273,6 +3275,51 @@ export default function Home() {
   const visibleTotalCount = isServerPagedFolder && serverTotal > 0 ? serverTotal : displayVisible.length;
   const isFetchingNewFolder = (loadedFolder ?? null) !== (currentFolder ?? null) && backendState !== "offline" && backendState !== "cached" && !hasMemoryCache;
   const isRestoringMemoryCache = (loadedFolder ?? null) !== (currentFolder ?? null) && hasMemoryCache;
+  const audioPreloadOwner = (backendState === "online" || backendState === "cached") && !selectionMode ? sessionUser?.id : undefined;
+  const audioViewportRef = useRef<HTMLDivElement>(null);
+  const audioById = useMemo(() => new Map(renderedVisible
+    .filter((item) => item.kind === "audio")
+    .map((item) => [String(item.id), item])), [renderedVisible]);
+  const updateViewportAudio = useEffectEvent((visibleIds: Set<string>, owner: number) => {
+    const tracks: MediaItem[] = [];
+    for (const id of visibleIds) {
+      const item = audioById.get(id);
+      if (item && (!miniplayerPlaying || item.src !== miniplayerItem?.src)) tracks.push(item);
+    }
+    setViewportAudio(tracks, owner, playbackResumeTime);
+  });
+
+  useEffect(() => discardPreparedAudio, [currentFolder, section, audioPreloadOwner]);
+  useEffect(() => {
+    const grid = audioViewportRef.current;
+    if (!grid || !audioPreloadOwner || isFetchingNewFolder || typeof IntersectionObserver === "undefined") return;
+    const visibleIds = new Set<string>();
+    const publish = () => updateViewportAudio(visibleIds, audioPreloadOwner);
+    const observer = new IntersectionObserver((changes) => {
+      for (const change of changes) {
+        const id = (change.target as HTMLElement).dataset.viewportAudio;
+        if (!id) continue;
+        if (change.isIntersecting && change.intersectionRatio >= 0.01) visibleIds.add(id);
+        else visibleIds.delete(id);
+      }
+      publish();
+    }, { threshold: 0.01 });
+    for (const card of grid.querySelectorAll<HTMLElement>("[data-viewport-audio]")) {
+      observer.observe(card);
+      const id = card.dataset.viewportAudio;
+      if (!id) continue;
+      const rect = card.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight && rect.right > 0 && rect.left < window.innerWidth) {
+        visibleIds.add(id);
+      }
+    }
+    if (visibleIds.size > 0) publish();
+    document.addEventListener("visibilitychange", publish);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", publish);
+    };
+  }, [audioById, audioPreloadOwner, currentFolder, isFetchingNewFolder, section, useMixedListView]);
 
   useEffect(() => {
     setPagination((current) => {
@@ -3459,6 +3506,13 @@ export default function Home() {
   };
 
   const readPlayback = (item: MediaItem): PlaybackState | null => item.path && savesWatchProgress(item.path) ? playback[item.path] ?? null : null;
+  function playbackResumeTime(item: MediaItem) {
+    if (!item.path || !savesWatchProgress(item.path)) return 0;
+    const remote = readPlayback(item);
+    const local = readLocalWatchProgress(sessionUser?.id)[item.path];
+    const saved = local && (!remote || local.updated >= remote.updated) ? local : remote;
+    return saved && !saved.completed ? saved.position : 0;
+  }
 
   const seriesPathForVideo = (item: MediaItem) => {
     if (item.catalogKind === "movie") return null;
@@ -3590,15 +3644,12 @@ export default function Home() {
 
     const libraryType = libraries[(item.parent ?? "").split("/")[0]]?.content_type;
     const source = queueSource ? queueSourceForItem(queueSource, item) : undefined;
-    const remoteAudio = readPlayback(item);
-    const localAudio = readLocalWatchProgress(sessionUser?.id)[item.path ?? ""];
-    const savedAudio = localAudio && (!remoteAudio || localAudio.updated >= remoteAudio.updated) ? localAudio : remoteAudio;
     const initialQueue = playbackQueue ?? [item];
     const startedSession = startPlaybackSession({
       userId: sessionUser?.id ?? 0, item, queue: initialQueue, source,
       label: queueLabel ?? (source?.method === "shuffle" ? "Shuffled" : source?.method === "all" ? "Play all" : "Queue"),
       returnUrl: `${window.location.pathname}${window.location.search}`,
-      watchEntry: item.kind !== "audio", complete: !source, time: !savesWatchProgress(item.path) ? 0 : startAt ?? (savedAudio && !savedAudio.completed ? savedAudio.position : 0), playing: true,
+      watchEntry: item.kind !== "audio", complete: !source, time: !savesWatchProgress(item.path) ? 0 : startAt ?? playbackResumeTime(item), playing: true,
     });
     if (item.kind === "audio") {
       void recordAccess(item.path);
@@ -7415,6 +7466,7 @@ export default function Home() {
           ) : displayVisible.length ? (
             <>
               <div
+                ref={audioViewportRef}
                 className={useMixedListView ? "media-list" : `media-grid${!currentFolder && section === "library" && !activeSearch.trim() ? " library-home-grid" : ""}`}
                 onContextMenu={openLibraryContextMenu}
               >
@@ -7670,6 +7722,7 @@ export default function Home() {
                   ));
                   return (
                     <article
+                      data-viewport-audio={item.kind === "audio" ? item.id : undefined}
                       draggable={!selectionMode && canMoveItem(item)}
                       onDragStart={(event) => startMoveDrag(event, item)}
                       onDragEnd={() => {

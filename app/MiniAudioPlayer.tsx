@@ -15,6 +15,7 @@ import { queueOfflineFavorite } from "./lib/offline";
 import OrganizeMediaModal, { type OrganizeSavedState } from "./OrganizeMediaModal";
 import { updateSnapshotOrganization } from "./lib/browse-cache";
 import { useBackLayer } from "./lib/back-layers";
+import { takePreparedAudio } from "./lib/audio-preload";
 
 function QueueDurationProbe({ item, onDuration }: { item: MediaItem; onDuration: (path: string, duration: number) => void }) {
   if (!item.src || !item.path || item.duration || item.kind === "image") return null;
@@ -80,6 +81,7 @@ export default function MiniAudioPlayer({
   onPlayingChange,
   onClose,
 }: MiniAudioPlayerProps) {
+  const audioHostRef = useRef<HTMLSpanElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressSentRef = useRef(0);
   const progressCheckpointRef = useRef(0);
@@ -125,20 +127,7 @@ export default function MiniAudioPlayer({
     onItemChange(next, playing);
   };
 
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    // Capture the outgoing item before React swaps the source or unmounts us.
-    const save = () => checkpointLatest(audio, "stopped");
-    window.addEventListener("pagehide", save);
-    return () => { window.removeEventListener("pagehide", save); save(); };
-  }, []);
   const activeAudio = () => audioRef.current;
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    return () => { if (audio) releaseMediaVolume(audio); };
-  }, []);
   const [volumeMenuOpen, setVolumeMenuOpen] = useState(false);
   const [volumeAdjusting, setVolumeAdjusting] = useState(false);
   const volumeSliderInteraction = {
@@ -223,7 +212,7 @@ export default function MiniAudioPlayer({
     if (activeAudio()) activeAudio()!.muted = muted;
   }, [muted]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     resumeAppliedRef.current = "";
     pendingSeekRef.current = null;
     scrubbingRef.current = false;
@@ -327,15 +316,20 @@ export default function MiniAudioPlayer({
     applyMediaVolume(audio, volume);
     audio.muted = muted;
     audio.loop = loopEnabled;
-    const resumeAt = initialTime > 0 ? initialTime : 0;
+    const resumeAt = initialTime > 0 && initialTime < audio.duration - 0.25 ? initialTime : 0;
     const startPlayback = () => {
+      if (audioRef.current !== audio) return;
       setCurrentTime(audio.currentTime);
       const shouldPlay = playAfterLoadRef.current ?? initialPlaying;
       playAfterLoadRef.current = null;
-      if (shouldPlay) void audio.play().catch(() => { setPlaying(false); setPlaybackError("Playback could not start. Press Play to try again."); });
+      if (shouldPlay) void audio.play().catch(() => {
+        if (audioRef.current !== audio) return;
+        setPlaying(false);
+        setPlaybackError("Playback could not start. Press Play to try again.");
+      });
       else audio.pause();
     };
-    if (resumeAt > 0 && Number.isFinite(audio.duration) && resumeAt < audio.duration - 0.25) {
+    if (Number.isFinite(audio.duration) && Math.abs(audio.currentTime - resumeAt) > 0.005) {
       audio.addEventListener("seeked", startPlayback, { once: true });
       audio.currentTime = resumeAt;
       return;
@@ -611,30 +605,60 @@ export default function MiniAudioPlayer({
     void clearNativeMediaSession();
   }, []);
 
+  const audioEvents = useEffectEvent((event: string, audio: HTMLAudioElement) => {
+    switch (event) {
+      case "play":
+        resumeMediaVolume(audio);
+        setPlaying(true);
+        setPlaybackError("");
+        checkpoint(audio, "started");
+        break;
+      case "pause": setPlaying(false); checkpoint(audio, "paused"); break;
+      case "timeupdate": updatePlaybackTime(audio); checkpoint(audio); break;
+      case "seeked": updatePlaybackTime(audio); checkpoint(audio, "resumed", true); break;
+      case "loadedmetadata": setDuration(audio.duration); applyResume(audio); break;
+      case "durationchange": setDuration(audio.duration); break;
+      case "volumechange": setVolume(readMediaVolumePosition(audio)); setMuted(audio.muted); break;
+      case "ended": handlePlaybackEnded(); break;
+      case "error": setPlaying(false); setPlaybackError("This audio could not be loaded. Try another item in the queue."); break;
+    }
+  });
+
+  useLayoutEffect(() => {
+    const host = audioHostRef.current;
+    if (!host || !item.src) return;
+    const prepared = takePreparedAudio(item.src, getSessionUser()?.id);
+    // A new element with the same URL would start its own load. Keep the
+    // prepared element itself so the decoder and buffered media stay ready.
+    const audio = prepared ?? document.createElement("audio");
+    audio.className = "miniplayer-source";
+    if (prepared) audio.preload = "auto";
+    audio.autoplay = Boolean(!prepared && initialPlaying && initialTime <= 0);
+    const events = ["play", "pause", "timeupdate", "seeked", "loadedmetadata", "durationchange", "volumechange", "ended", "error"];
+    const handleEvent = (event: Event) => audioEvents(event.type, audio);
+    for (const event of events) audio.addEventListener(event, handleEvent);
+    const save = () => checkpointLatest(audio, "stopped");
+    window.addEventListener("pagehide", save);
+    audioRef.current = audio;
+    host.appendChild(audio);
+    if (!prepared) audio.src = item.src;
+    else if (audio.readyState >= 1) audioEvents("loadedmetadata", audio);
+    return () => {
+      save();
+      window.removeEventListener("pagehide", save);
+      for (const event of events) audio.removeEventListener(event, handleEvent);
+      audioRef.current = null;
+      audio.pause();
+      releaseMediaVolume(audio);
+      audio.remove();
+      audio.removeAttribute("src");
+      audio.load();
+    };
+  }, [item.id, item.src, initialPlaying, initialTime]);
+
   return <>
     <div className={`miniplayer${expanded ? " expanded" : ""}`}>
-      <audio
-        ref={audioRef}
-        className="miniplayer-source"
-        src={item.src}
-        autoPlay={initialPlaying}
-        loop={loopEnabled}
-        onPlay={(event) => { resumeMediaVolume(event.currentTarget); setPlaying(true); setPlaybackError(""); checkpoint(event.currentTarget, "started"); }}
-        onPause={(event) => { setPlaying(false); checkpoint(event.currentTarget, "paused"); }}
-        onTimeUpdate={(event) => { updatePlaybackTime(event.currentTarget); checkpoint(event.currentTarget); }}
-        onSeeked={(event) => { updatePlaybackTime(event.currentTarget); checkpoint(event.currentTarget, "resumed", true); }}
-        onLoadedMetadata={(event) => {
-          setDuration(event.currentTarget.duration);
-          applyResume(event.currentTarget);
-        }}
-        onDurationChange={(event) => setDuration(event.currentTarget.duration)}
-        onVolumeChange={(event) => {
-          setVolume(readMediaVolumePosition(event.currentTarget));
-          setMuted(event.currentTarget.muted);
-        }}
-        onEnded={handlePlaybackEnded}
-        onError={() => { setPlaying(false); setPlaybackError("This audio could not be loaded. Try another item in the queue."); }}
-      />
+      <span ref={audioHostRef} hidden />
       <div className="miniplayer-header">
         <div
           onTouchStart={startTrackSwipe}

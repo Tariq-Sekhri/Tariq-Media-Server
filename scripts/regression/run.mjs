@@ -58,7 +58,7 @@ try {
   const baseline = args.get('--baseline') ? JSON.parse(await readFile(args.get('--baseline'),'utf8')) : null;
   const results=[];
   for (const s of config.scenarios) {
-    const level = s.kind==='audio'&&s.verifyAudioSamples?'client-decoded-fixture-tone':{image:'decoded-visible-dom',video:'visible-video-frame-callback',audio:'audio-timeline',element:'visible-dom'}[s.kind];
+    const level = s.kind==='audio'&&s.verifyAudioSamples?'audio-start-with-verified-samples':{image:'decoded-visible-dom',video:'visible-video-frame-callback',audio:'audio-timeline',element:'visible-dom'}[s.kind];
     const metadata={scenarioId:s.id,budget:s.budget,measurementLevel:level,device:serial,appVersion:buildId,fixtureVersion:fixture.fixtureVersion,cacheMode:s.cacheMode||'warm',runtimeProfile,scenarioVersion:digest(Buffer.concat([methodIdentity,Buffer.from(JSON.stringify(s))]))};
     const runs=[];
     for(let i=0;i<attempts;i++) {
@@ -66,9 +66,14 @@ try {
       try {
         if(s.prepareUrl){
           assert.equal(new URL(s.prepareUrl).origin,'http://127.0.0.1:3100','Automatic preparation is confined to the synthetic fixture');
+          const previousDocument=await connection.evaluate('performance.timeOrigin');
           await call('Page.navigate',{url:s.prepareUrl});
           let ready=false;const deadline=Date.now()+15000;
-          while(Date.now()<deadline){const r=await call('Runtime.evaluate',{expression:`!!document.querySelector(${JSON.stringify(s.clickSelector)})`,returnByValue:true});if(r.result?.value){ready=true;break;}await new Promise(r=>setTimeout(r,100));}
+          while(Date.now()<deadline){
+            ready=await connection.evaluate(`performance.timeOrigin!==${previousDocument} && !!document.querySelector(${JSON.stringify(s.clickSelector)})`);
+            if(ready)break;
+            await new Promise(r=>setTimeout(r,100));
+          }
           assert.ok(ready,'Scenario preparation failed');
           assert.equal(await connection.evaluate(`document.querySelector('meta[name="tms-regression-build"]')?.content`),buildId,'WebView is not showing the served build');
           if(s.cacheMode==='cold')await call('Network.clearBrowserCache');
@@ -116,7 +121,7 @@ try {
         }
       } catch(error) { run = {status:'blocked',reason:error.message==='Scenario preparation failed'?'preparation-timeout':'cdp-error'}; }
       runs.push(run);
-      console.log(JSON.stringify({scenario:s.id,attempt:i+1,status:run.status,ms:run.ms,reason:run.reason,...(run.pixelReason?{pixelReason:run.pixelReason}:{})}));
+      console.log(JSON.stringify({scenario:s.id,attempt:i+1,status:run.status,ms:run.ms,sampleVerificationMs:run.sampleVerificationMs,reason:run.reason,...(run.pixelReason?{pixelReason:run.pixelReason}:{})}));
     }
     const comparison=baseline?.results?.find(x=>x.metadata.scenarioId===s.id);
     const summary=assess(metadata,runs,baseline ? comparison || {} : null);
