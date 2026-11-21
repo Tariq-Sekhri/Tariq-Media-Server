@@ -14779,7 +14779,7 @@ async fn transcode(
     // playback starts in a fraction of a second instead of after several.
     let probe_started = Instant::now();
     let copy_seek = if query.copy_video && height == source.source_height && subtitle_stream.is_none() {
-        copy_video_seek(&state, &input, &source, start).await
+        copy_video_seek(&state, &input, &source, start, audio_stream).await
     } else {
         None
     };
@@ -14791,7 +14791,17 @@ async fn transcode(
         keyframe_probe_ms = probe_started.elapsed().as_millis() as u64,
         "Chose HLS video mode"
     );
-    let (key, url) = transcode_key_and_url(&query.video_path, height, start, audio_stream, subtitle_stream, copy_seek.is_some());
+    if should_skip_copy_video_preload(query.preload, copy_seek.is_some()) {
+        tracing::info!(
+            reason = "playback_next_preload_skipped_copy_video",
+            attempt_id = ?query.attempt_id,
+            video_path = %query.video_path,
+            "Skipped truncated preload for stream-copied HLS"
+        );
+        return Err(StatusCode::NO_CONTENT);
+    }
+    let copy_video = copy_seek.is_some();
+    let (key, url) = transcode_key_and_url(&query.video_path, height, start, audio_stream, subtitle_stream, copy_video);
     ensure_transcode(
         &state,
         &input,
@@ -14805,7 +14815,7 @@ async fn transcode(
         audio_stream,
         subtitle_stream,
         query.preload,
-        copy_seek,
+        copy_video,
     )
     .await?;
     Ok(Json(TranscodeResponse {
@@ -14815,36 +14825,134 @@ async fn transcode(
     }))
 }
 
-/// When the source video is browser-safe H.264, returns the keyframe at or
-/// before `start`. Both streams begin there, so copied video and encoded audio
-/// stay aligned without an accurate (decoding) seek.
-async fn copy_video_seek(state: &AppState, input: &Path, source: &QualityResponse, start: u64) -> Option<f64> {
+fn should_skip_copy_video_preload(preload: bool, copy_video: bool) -> bool {
+    preload && copy_video
+}
+
+fn copy_video_seek_probe_args(
+    input: &Path,
+    start: u64,
+    audio_stream: Option<u32>,
+) -> Vec<std::ffi::OsString> {
+    let audio_map = audio_stream
+        .map(|stream| format!("0:{stream}"))
+        .unwrap_or_else(|| "0:a:0?".to_owned());
+    let mut args = vec![
+        std::ffi::OsString::from("-v"),
+        std::ffi::OsString::from("error"),
+        std::ffi::OsString::from("-noaccurate_seek"),
+        std::ffi::OsString::from("-ss"),
+        std::ffi::OsString::from(start.to_string()),
+        std::ffi::OsString::from("-i"),
+        input.as_os_str().to_owned(),
+    ];
+    for arg in ["-map", "0:v:0", "-map", &audio_map, "-c", "copy", "-t", "1", "-f", "framecrc", "-"] {
+        args.push(std::ffi::OsString::from(arg));
+    }
+    args
+}
+
+/// When the source video is browser-safe H.264, probes the exact landing
+/// timestamp produced by `-noaccurate_seek -ss <start>` and verifies that
+/// mapped audio starts alongside video before enabling video stream-copy.
+async fn copy_video_seek(
+    state: &AppState,
+    input: &Path,
+    source: &QualityResponse,
+    start: u64,
+    audio_stream: Option<u32>,
+) -> Option<f64> {
     if !video_codec_is_remux_safe(source.video_codec.as_deref()?) { return None; }
     if !matches!(source.video_pix_fmt.as_deref()?, "yuv420p" | "yuvj420p") { return None; }
     if start == 0 { return Some(0.0); }
-    let start_time = source.start_time;
-    let output = hidden_async_command(&state.ffprobe_path)
-        .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", "-read_intervals"])
-        .arg(format!("{}%{}", start.saturating_sub(12), start + 1))
-        .arg(input)
+    let output = hidden_async_command(&state.ffmpeg_path)
+        .args(copy_video_seek_probe_args(input, start, audio_stream))
         .output()
         .await
         .ok()
         .filter(|output| output.status.success())?;
-    keyframe_at_or_before(&String::from_utf8_lossy(&output.stdout), start as f64 + start_time)
-        .map(|keyframe| (keyframe - start_time).max(0.0))
+    parse_copy_video_seek_probe(&String::from_utf8_lossy(&output.stdout), start)
 }
 
-fn keyframe_at_or_before(packets: &str, target: f64) -> Option<f64> {
-    packets
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.trim().split(',');
-            let pts = fields.next()?.parse::<f64>().ok().filter(|pts| pts.is_finite())?;
-            fields.next()?.starts_with('K').then_some(pts)
-        })
-        .filter(|pts| *pts <= target + 0.001)
-        .reduce(f64::max)
+fn parse_framecrc_timebase(line: &str) -> Option<(usize, f64)> {
+    let rest = line.trim().strip_prefix("#tb ")?;
+    let (stream, frac) = rest.split_once(':')?;
+    let stream = stream.trim().parse::<usize>().ok()?;
+    let (num, den) = frac.trim().split_once('/')?;
+    let num = num.trim().parse::<f64>().ok()?;
+    let den = den.trim().parse::<f64>().ok()?;
+    if !num.is_finite() || !den.is_finite() || num <= 0.0 || den <= 0.0 {
+        return None;
+    }
+    Some((stream, num / den))
+}
+
+fn parse_framecrc_packet_seconds(line: &str, stream_index: usize, timebase: f64) -> Option<f64> {
+    let mut fields = line.split(',').map(str::trim);
+    let stream = fields.next()?.parse::<usize>().ok()?;
+    if stream != stream_index {
+        return None;
+    }
+    let dts = fields.next()?;
+    let pts = fields.next()?;
+    let raw_ticks = pts
+        .parse::<i64>()
+        .ok()
+        .or_else(|| dts.parse::<i64>().ok())?;
+    let seconds = raw_ticks as f64 * timebase;
+    seconds.is_finite().then_some(seconds)
+}
+
+fn parse_copy_video_seek_probe(output: &str, start: u64) -> Option<f64> {
+    let mut tb0: Option<f64> = None;
+    let mut tb1: Option<f64> = None;
+    let mut v0_rel: Option<f64> = None;
+    let mut a0_rel: Option<f64> = None;
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("#tb ") {
+            if let Some((stream, tb)) = parse_framecrc_timebase(trimmed) {
+                match stream {
+                    0 => tb0 = Some(tb),
+                    1 => tb1 = Some(tb),
+                    _ => {}
+                }
+            }
+            continue;
+        }
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        if v0_rel.is_none() {
+            if let Some(tb) = tb0 {
+                if let Some(sec) = parse_framecrc_packet_seconds(trimmed, 0, tb) {
+                    v0_rel = Some(sec);
+                    continue;
+                }
+            }
+        }
+        if a0_rel.is_none() {
+            if let Some(tb) = tb1 {
+                if let Some(sec) = parse_framecrc_packet_seconds(trimmed, 1, tb) {
+                    a0_rel = Some(sec);
+                }
+            }
+        }
+    }
+    let v0_rel = v0_rel?;
+    if !(-15.0..=1.0).contains(&v0_rel) {
+        return None;
+    }
+    if tb1.is_some() {
+        let a0_rel = a0_rel?;
+        if (a0_rel - v0_rel).abs() > 0.5 {
+            return None;
+        }
+    }
+    Some((start as f64 + v0_rel).max(0.0))
 }
 
 async fn auto_transcode_variant(
@@ -14900,7 +15008,7 @@ async fn auto_transcode_variant(
         audio_stream,
         subtitle_stream,
         false,
-        None,
+        false,
     )
     .await?;
     Ok(Redirect::temporary(&url))
@@ -15118,7 +15226,7 @@ fn transcode_key_and_url(
     // browser-incompatible pixel format are never reused.
     "v16-accurate-seek-av-timing"
         .hash(&mut hasher);
-    if copy_video { "copy-video-keyframe-start".hash(&mut hasher); }
+    if copy_video { "copy-video-noaccurate-v2".hash(&mut hasher); }
     video_path.hash(&mut hasher);
     height.hash(&mut hasher);
     start.hash(&mut hasher);
@@ -15138,6 +15246,186 @@ fn bitrate_for_height(height: u32) -> u32 {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreloadedHlsAction {
+    ReuseComplete,
+    AppendPrefix,
+    ReplaceClean,
+    StartFresh,
+}
+
+fn resolve_preloaded_hls_action(
+    is_preloaded: bool,
+    preload: bool,
+    copy_video: bool,
+    playlist_complete: bool,
+) -> PreloadedHlsAction {
+    if playlist_complete && (!is_preloaded || (preload && !copy_video)) {
+        PreloadedHlsAction::ReuseComplete
+    } else if is_preloaded && !preload && !copy_video && playlist_complete {
+        PreloadedHlsAction::AppendPrefix
+    } else if is_preloaded && copy_video {
+        PreloadedHlsAction::ReplaceClean
+    } else {
+        PreloadedHlsAction::StartFresh
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_hls_ffmpeg_args(
+    input: &Path,
+    height: u32,
+    start: u64,
+    prefix_seconds: f64,
+    audio_stream: Option<u32>,
+    subtitle_stream: Option<u32>,
+    preload: bool,
+    copy_video: bool,
+    software_video: bool,
+    segment_pattern: &Path,
+    playlist: &Path,
+) -> Vec<std::ffi::OsString> {
+    let hls_segment_seconds = HLS_SEGMENT_SECONDS.to_string();
+    let force_key_frames_expr = format!("expr:gte(t,n_forced*{hls_segment_seconds})");
+    let mut args = vec![std::ffi::OsString::from("-y")];
+    let push_args = |target: &mut Vec<std::ffi::OsString>, items: &[&str]| {
+        target.extend(items.iter().map(std::ffi::OsString::from));
+    };
+    // Bitmap PGS captions cannot be delivered as browser WebVTT. When the
+    // user selects one, decode and overlay it in FFmpeg instead. This is a
+    // separate CPU path because the subtitle decoder produces software frames.
+    if subtitle_stream.is_none() && !software_video && !copy_video {
+        push_args(&mut args, &[
+            "-init_hw_device",
+            "d3d11va=d3d",
+            "-init_hw_device",
+            "opencl=ocl@d3d",
+            "-filter_hw_device",
+            "ocl",
+            "-hwaccel",
+            "d3d11va",
+            "-hwaccel_device",
+            "d3d",
+            "-hwaccel_output_format",
+            "d3d11",
+            "-extra_hw_frames",
+            "64",
+        ]);
+    }
+    push_args(&mut args, &["-readrate", "16"]);
+    let input_start = if copy_video { start as f64 } else { start as f64 + prefix_seconds };
+    if input_start > 0.0 {
+        if copy_video {
+            push_args(&mut args, &["-noaccurate_seek", "-ss", &start.to_string()]);
+        } else {
+            push_args(&mut args, &["-ss", &input_start.to_string()]);
+            if subtitle_stream.is_some() {
+                // Input seeking normally resets PGS timestamps while the subtitle
+                // decoder keeps their original timing. Preserve and rebase both
+                // streams so a resumed local-caption playback is never black.
+                push_args(&mut args, &["-copyts", "-start_at_zero"]);
+            }
+        }
+    }
+    args.push(std::ffi::OsString::from("-i"));
+    args.push(input.as_os_str().to_owned());
+    if preload {
+        // Cache about ten seconds, then exit. Never encode an unseen episode.
+        push_args(&mut args, &["-t", "12"]);
+    }
+    if let Some(subtitle_stream) = subtitle_stream {
+        let filter = format!("[0:v:0][0:{subtitle_stream}]overlay,scale=-2:{height},format=yuv420p[video]");
+        push_args(&mut args, &["-filter_complex", &filter, "-map", "[video]"]);
+    } else {
+        push_args(&mut args, &["-map", "0:v:0"]);
+    }
+    if let Some(audio_stream) = audio_stream {
+        let map = format!("0:{audio_stream}");
+        push_args(&mut args, &["-map", &map]);
+    } else {
+        push_args(&mut args, &["-map", "0:a:0?"]);
+    }
+    if copy_video {
+        push_args(&mut args, &["-c:v", "copy"]);
+    } else if subtitle_stream.is_none() && !software_video {
+        // AMF H.264 accepts 8-bit NV12 only. Keep this conversion even when
+        // source height matches: Main 10 sources otherwise reach AMF as P010.
+        let vf = format!("hwmap=derive_device=opencl,scale_opencl=w=-2:h={height}:format=nv12,hwdownload,format=nv12");
+        let bitrate = format!("{}k", bitrate_for_height(height));
+        let bufsize = format!("{}k", bitrate_for_height(height) * 2);
+        push_args(&mut args, &[
+            "-vf",
+            &vf,
+            "-c:v",
+            "h264_amf",
+            "-usage",
+            "transcoding",
+            "-quality",
+            "balanced",
+            "-rc",
+            "cbr",
+            "-profile:v",
+            "high",
+            "-b:v",
+            &bitrate,
+            "-maxrate",
+            &bitrate,
+            "-bufsize",
+            &bufsize,
+        ]);
+    } else {
+        push_args(&mut args, &[
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            "-pix_fmt",
+            "yuv420p",
+            "-profile:v",
+            "high",
+            "-threads",
+            "4",
+        ]);
+    }
+    if !copy_video {
+        push_args(&mut args, &["-force_key_frames", &force_key_frames_expr, "-g", "48", "-keyint_min", "48"]);
+    }
+    let hls_flags = if prefix_seconds > 0.0 {
+        "independent_segments+append_list"
+    } else {
+        "independent_segments"
+    };
+    if copy_video && start > 0 {
+        push_args(&mut args, &["-avoid_negative_ts", "make_zero"]);
+    }
+    push_args(&mut args, &[
+        "-c:a",
+        "aac",
+        "-ac",
+        "2",
+        "-ar",
+        "48000",
+        "-b:a",
+        "256k",
+        "-f",
+        "hls",
+        "-hls_time",
+        &hls_segment_seconds,
+        "-hls_list_size",
+        "0",
+        "-hls_playlist_type",
+        "event",
+        "-hls_flags",
+        hls_flags,
+        "-hls_segment_filename",
+    ]);
+    args.push(segment_pattern.as_os_str().to_owned());
+    args.push(playlist.as_os_str().to_owned());
+    args
+}
+
 async fn ensure_transcode(
     state: &AppState,
     input: &Path,
@@ -15151,9 +15439,9 @@ async fn ensure_transcode(
     audio_stream: Option<u32>,
     subtitle_stream: Option<u32>,
     preload: bool,
-    copy_seek: Option<f64>,
+    copy_video: bool,
 ) -> Result<(), StatusCode> {
-    let startup_segments = if copy_seek.is_some() { 1 } else { HLS_STARTUP_SEGMENTS };
+    let startup_segments = if copy_video { 1 } else { HLS_STARTUP_SEGMENTS };
     // This lock only protects inspecting/replacing the shared HLS directory
     // and registering the child. Do not hold it while waiting for FFmpeg's
     // first segment: a replacement player session must be able to join the
@@ -15179,27 +15467,36 @@ async fn ensure_transcode(
     }
     let preloaded_marker = directory.join("preloaded");
     let is_preloaded = preloaded_marker.is_file();
-    if playlist_is_complete(&playlist).await && (!is_preloaded || preload) {
-        tracing::info!(
-            reason = "playback_hls_cache_reuse",
-            transcode_key = %key,
-            session = %session,
-            attempt_id = ?attempt_id,
-            input = %input.display(),
-            height,
-            start_seconds = start,
-            "Reused completed HLS cache without launching FFmpeg"
-        );
-        return Ok(());
-    }
+    let playlist_complete = playlist_is_complete(&playlist).await;
     let mut prefix_seconds = 0.0;
-    if is_preloaded && !preload && playlist_is_complete(&playlist).await {
-        let contents = tokio::fs::read_to_string(&playlist).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        prefix_seconds = playlist_segments_with_durations(&contents).iter().map(|(_, duration)| duration).sum();
-        // Remove ENDLIST before the player attaches; hls.js must keep polling.
-        tokio::fs::write(&playlist, contents.replace("#EXT-X-ENDLIST", "")).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        state.active_transcodes.lock().await.remove(key);
-        let _ = tokio::fs::remove_file(&preloaded_marker).await;
+    match resolve_preloaded_hls_action(is_preloaded, preload, copy_video, playlist_complete) {
+        PreloadedHlsAction::ReuseComplete => {
+            tracing::info!(
+                reason = "playback_hls_cache_reuse",
+                transcode_key = %key,
+                session = %session,
+                attempt_id = ?attempt_id,
+                input = %input.display(),
+                height,
+                start_seconds = start,
+                "Reused completed HLS cache without launching FFmpeg"
+            );
+            return Ok(());
+        }
+        PreloadedHlsAction::AppendPrefix => {
+            let contents = tokio::fs::read_to_string(&playlist).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            prefix_seconds = playlist_segments_with_durations(&contents).iter().map(|(_, duration)| duration).sum();
+            // Remove ENDLIST before the player attaches; hls.js must keep polling.
+            tokio::fs::write(&playlist, contents.replace("#EXT-X-ENDLIST", "")).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            state.active_transcodes.lock().await.remove(key);
+            let _ = tokio::fs::remove_file(&preloaded_marker).await;
+        }
+        PreloadedHlsAction::ReplaceClean => {
+            if directory.is_dir() {
+                let _ = tokio::fs::remove_dir_all(&directory).await;
+            }
+        }
+        PreloadedHlsAction::StartFresh => {}
     }
     tokio::fs::create_dir_all(&directory).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let marker = directory.join("started");
@@ -15257,18 +15554,14 @@ async fn ensure_transcode(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let segment_pattern = directory.join("segment_%05d.ts");
-    let hls_segment_seconds = HLS_SEGMENT_SECONDS.to_string();
-    let force_key_frames_expr = format!("expr:gte(t,n_forced*{hls_segment_seconds})");
     let log = std::fs::File::create(directory.join("ffmpeg.log"))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let log_err = log
         .try_clone()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    // Accurate input seeks discard audio preroll, but video stream-copy keeps
-    // the earlier keyframe. That creates an audio gap at the start of resumed
-    // HLS streams. Encode both timelines accurately, using CPU H.264 here to
-    // avoid the D3D/OpenCL initialization hang on original-resolution playback.
-    let copy_video = copy_seek.is_some();
+    // Stream-copied seeks must use -noaccurate_seek with -avoid_negative_ts make_zero
+    // so both video and encoded audio start together from the landed keyframe.
+    // Otherwise encode both timelines accurately (CPU H.264 avoids D3D/OpenCL hangs).
     let software_video = if !copy_video && height == source_height && subtitle_stream.is_none() {
         hidden_async_command(&state.ffprobe_path)
             .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of", "default=noprint_wrappers=1:nokey=1"])
@@ -15277,136 +15570,24 @@ async fn ensure_transcode(
             .filter(|output| output.status.success())
             .is_some_and(|output| video_codec_is_remux_safe(String::from_utf8_lossy(&output.stdout).trim()))
     } else { false };
-    let mut command = hidden_async_command(&state.ffmpeg_path);
-    command.arg("-y");
-    // Bitmap PGS captions cannot be delivered as browser WebVTT. When the
-    // user selects one, decode and overlay it in FFmpeg instead. This is a
-    // separate CPU path because the subtitle decoder produces software frames.
-    if subtitle_stream.is_none() && !software_video && !copy_video {
-        command.args([
-            "-init_hw_device",
-            "d3d11va=d3d",
-            "-init_hw_device",
-            "opencl=ocl@d3d",
-            "-filter_hw_device",
-            "ocl",
-            "-hwaccel",
-            "d3d11va",
-            "-hwaccel_device",
-            "d3d",
-            "-hwaccel_output_format",
-            "d3d11",
-            "-extra_hw_frames",
-            "64",
-        ]);
-    }
-    command.args(["-readrate", "16"]);
-    let input_start = copy_seek.unwrap_or(start as f64) + prefix_seconds;
-    if input_start > 0.0 {
-        // A copied stream seeks to the keyframe at or before -ss. Aim just
-        // past the known keyframe so float rounding never selects the previous one.
-        let seek = if copy_video { input_start + 0.02 } else { input_start };
-        command.args(["-ss", &seek.to_string()]);
-        if subtitle_stream.is_some() {
-            // Input seeking normally resets PGS timestamps while the subtitle
-            // decoder keeps their original timing. Preserve and rebase both
-            // streams so a resumed local-caption playback is never black.
-            command.args(["-copyts", "-start_at_zero"]);
-        }
-    }
-    command.arg("-i").arg(input);
     if preload {
-        // Cache about ten seconds, then exit. Never encode an unseen episode.
-        command.args(["-t", "12"]);
         tokio::fs::write(&preloaded_marker, b"").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
-    if let Some(subtitle_stream) = subtitle_stream {
-        command.args([
-            "-filter_complex",
-            &format!("[0:v:0][0:{subtitle_stream}]overlay,scale=-2:{height},format=yuv420p[video]"),
-            "-map",
-            "[video]",
-        ]);
-    } else {
-        command.args(["-map", "0:v:0"]);
-    }
-    if let Some(audio_stream) = audio_stream {
-        command.args(["-map", &format!("0:{audio_stream}")]);
-    } else {
-        command.args(["-map", "0:a:0?"]);
-    }
-    if copy_video {
-        command.args(["-c:v", "copy"]);
-    } else if subtitle_stream.is_none() && !software_video {
-        // AMF H.264 accepts 8-bit NV12 only. Keep this conversion even when
-        // source height matches: Main 10 sources otherwise reach AMF as P010.
-        command.args([
-            "-vf",
-            &format!(
-                "hwmap=derive_device=opencl,scale_opencl=w=-2:h={height}:format=nv12,hwdownload,format=nv12"
-            ),
-        ]);
-        command.args([
-            "-c:v",
-            "h264_amf",
-            "-usage",
-            "transcoding",
-            "-quality",
-            "balanced",
-            "-rc",
-            "cbr",
-            "-profile:v",
-            "high",
-            "-b:v",
-            &format!("{}k", bitrate_for_height(height)),
-            "-maxrate",
-            &format!("{}k", bitrate_for_height(height)),
-            "-bufsize",
-            &format!("{}k", bitrate_for_height(height) * 2),
-        ]);
-    } else {
-        command.args([
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "20",
-            "-pix_fmt",
-            "yuv420p",
-            "-profile:v",
-            "high",
-            "-threads",
-            "4",
-        ]);
-    }
-    if !copy_video {
-        command.args(["-force_key_frames", &force_key_frames_expr, "-g", "48", "-keyint_min", "48"]);
-    }
+    let mut command = hidden_async_command(&state.ffmpeg_path);
     command
-        .args([
-            "-c:a",
-            "aac",
-            "-ac",
-            "2",
-            "-ar",
-            "48000",
-            "-b:a",
-            "256k",
-            "-f",
-            "hls",
-            "-hls_time",
-            &hls_segment_seconds,
-            "-hls_list_size",
-            "0",
-            "-hls_playlist_type",
-            "event",
-            "-hls_flags",
-            "independent_segments+append_list",
-            "-hls_segment_filename",
-        ])
-        .arg(segment_pattern)
-        .arg(&playlist)
+        .args(build_hls_ffmpeg_args(
+            input,
+            height,
+            start,
+            prefix_seconds,
+            audio_stream,
+            subtitle_stream,
+            preload,
+            copy_video,
+            software_video,
+            &segment_pattern,
+            &playlist,
+        ))
         .stdout(log)
         .stderr(log_err)
         .kill_on_drop(true);
@@ -21262,11 +21443,69 @@ mod tests {
     }
 
     #[test]
-    fn copied_video_starts_at_the_keyframe_before_the_resume_point() {
-        let packets = "570.000000,K__\n571.001000,___\n574.170000,K__\n575.000000,___\nN/A,K__\n602.000000,K__\n";
-        assert_eq!(keyframe_at_or_before(packets, 600.0), Some(574.17));
-        assert_eq!(keyframe_at_or_before(packets, 574.17), Some(574.17));
-        assert_eq!(keyframe_at_or_before(packets, 500.0), None);
+    fn copy_video_seek_probe_validates_alignment_timebases_and_dts_fallback() {
+        let mkv = "\
+#tb 0: 1/1000
+#tb 1: 1/1000
+0,      -1075,       -992,       41,    95118, 0x42c4c299
+1,       -992,       -992,       21,      339, 0x1ed39d1b
+";
+        assert_eq!(parse_copy_video_seek_probe(mkv, 92), Some(91.008));
+
+        let mp4_mixed_tb = "\
+#tb 0: 1/12288
+#tb 1: 1/48000
+0,     -31744,     -30720,      512,    49915, 0x2a22d7e1
+1,    -124800,    -124800,     1536,     1536, 0x5ab0e89d
+";
+        assert_eq!(parse_copy_video_seek_probe(mp4_mixed_tb, 60), Some(57.5));
+
+        let video_only = "\
+#tb 0: 1/1000
+0,      -1075,       -992,       41,    95118, 0x42c4c299
+";
+        assert_eq!(parse_copy_video_seek_probe(video_only, 92), Some(91.008));
+
+        let missing_audio_pkt = "\
+#tb 0: 1/1000
+#tb 1: 1/1000
+0,      -1075,       -992,       41,    95118, 0x42c4c299
+";
+        assert_eq!(parse_copy_video_seek_probe(missing_audio_pkt, 92), None);
+
+        let skewed_audio = "\
+#tb 0: 1/1000
+#tb 1: 1/1000
+0,      -2000,      -2000,       41,    95118, 0x42c4c299
+1,       -500,       -500,       21,      339, 0x1ed39d1b
+";
+        assert_eq!(parse_copy_video_seek_probe(skewed_audio, 92), None);
+
+        let too_far_back = "\
+#tb 0: 1/1000
+#tb 1: 1/1000
+0,     -15001,     -15001,       41,    95118, 0x42c4c299
+1,     -15001,     -15001,       21,      339, 0x1ed39d1b
+";
+        assert_eq!(parse_copy_video_seek_probe(too_far_back, 92), None);
+
+        let too_far_forward = "\
+#tb 0: 1/1000
+#tb 1: 1/1000
+0,       1001,       1001,       41,    95118, 0x42c4c299
+1,       1001,       1001,       21,      339, 0x1ed39d1b
+";
+        assert_eq!(parse_copy_video_seek_probe(too_far_forward, 92), None);
+
+        let dts_fallback_and_garbage = "\
+#tb 0: 1/1000
+#tb 1: 1/1000
+#other header: ignore me
+not a packet line
+0,       -500,        N/A,       41,    95118, 0x42c4c299
+1,       -480,       -480,       21,      339, 0x1ed39d1b
+";
+        assert_eq!(parse_copy_video_seek_probe(dts_fallback_and_garbage, 10), Some(9.5));
     }
 
     #[test]

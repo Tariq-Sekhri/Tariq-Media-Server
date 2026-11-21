@@ -15,6 +15,17 @@ export const canDirectPlayVideo = (info: VideoInfo, video: Pick<HTMLMediaElement
   return mime ? !!video.canPlayType(mime) : false;
 };
 
+// Stream-copied 8-bit H.264 starts in ~200ms as one continuous remux, so
+// preloading a truncated prefix would force an unnecessary mid-GOP splice.
+export const willStreamCopyVideo = (
+  info: VideoInfo,
+  video: Pick<HTMLMediaElement, "canPlayType"> | null,
+  subtitleStream: number | null,
+) => subtitleStream === null
+  && info.video_codec?.toLowerCase() === "h264"
+  && !(info.video_profile?.toLowerCase().includes("10"))
+  && canDirectPlayVideo(info, video);
+
 export const preferredAudioTrack = (tracks: AudioTrack[], language = "en") => {
   const normalize = (value: string) => ({ eng: "en", english: "en", jpn: "ja", japanese: "ja" }[value.trim().toLowerCase()] ?? value.trim().toLowerCase().split(/[-_]/)[0]);
   return tracks.find((track) => normalize(track.language) === normalize(language))

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useSta
 import { createPortal } from "react-dom";
 import { playsAlongside } from "../lib/library-playback";
 import Hls from "hls.js";
-import { cachedFragmentLoader, canDirectPlayVideo, preferredAudioTrack, preloadSegments, type VideoInfo } from "../lib/episode-preload";
+import { cachedFragmentLoader, canDirectPlayVideo, preferredAudioTrack, preloadSegments, willStreamCopyVideo, type VideoInfo } from "../lib/episode-preload";
 import { canBufferQueueVideo, nearbyQueueItems, QUEUE_PRELOAD_BYTES } from "../lib/queue-preload";
 import { authFetch, getSessionUser, reportClientError, reportClientPerformance } from "../lib/auth";
 import { beginPlaybackTrace, playbackTracePhase, traceFromParams, writePlaybackTrace } from "../lib/playback-trace";
@@ -2199,6 +2199,10 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
       shouldPlayRef.current = true;
       return;
     }
+    if (!backgroundAudioRef.current && details?.kind === "video" && quality !== "original" && !hlsRef.current && !video.getAttribute("src")) {
+      void changeQuality(quality, currentTime, true, true);
+      return;
+    }
     shouldPlayRef.current = true;
     if (video.paused) playSafely(video);
   };
@@ -2418,6 +2422,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
     bufferSizeOverride?: PlaybackPreferences["buffer_size_mb"],
     audioStreamOverride?: number | null,
     subtitleStreamOverride?: number | null,
+    allowCopyVideo = true,
   ) => {
     const video = videoRef.current;
     const requestedQuality = nextQuality === "original-aac" ? "original" : nextQuality;
@@ -2466,12 +2471,14 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
       && warm.subtitle === selectedSubtitleStream && warm.start === Math.max(0, Math.floor(resumeAt));
     const session = useWarmSession ? warm.session : createTranscodeSessionId();
     if (useWarmSession) nextPreloadRef.current = null;
+    else preloadedFragmentsRef.current.clear();
     activeTranscodeSessionRef.current = session;
     try {
       const attemptParam = details.playAttemptId ? `&attempt_id=${encodeURIComponent(details.playAttemptId)}` : "";
       const audioParam = selectedAudio === null ? "" : `&audio_stream=${encodeURIComponent(selectedAudio)}`;
       const subtitleParam = selectedSubtitleStream === null ? "" : `&subtitle_stream=${encodeURIComponent(selectedSubtitleStream)}`;
-      const copyParam = originalWithAac && videoCopyableRef.current ? "&copy_video=true" : "";
+      const useCopyVideo = originalWithAac && videoCopyableRef.current && allowCopyVideo;
+      const copyParam = useCopyVideo ? "&copy_video=true" : "";
       const response = await fetch(`${API_BASE}/api/transcode?video_path=${encodeURIComponent(path)}&quality=${encodeURIComponent(streamQuality)}&start=${Math.max(0, Math.floor(resumeAt))}&buffer_size_mb=${bufferSizeMb}&session=${encodeURIComponent(session)}${attemptParam}${audioParam}${subtitleParam}${copyParam}`);
       if (!response.ok) throw new Error("Quality switch failed");
       const { url, offset } = await response.json() as { url: string; offset: number; session: string };
@@ -2510,6 +2517,8 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
           if (selectedQuality === "auto") setResolvedQuality(hls.levels[data.level]?.height ?? 0);
         });
         let hlsPlaybackReady = false;
+        let mediaRecoveryAttempts = 0;
+        let networkRecoveryAttempts = 0;
         const triggerHlsPlay = () => {
           if (hlsPlaybackReady || requestId !== qualityRequestRef.current || hlsRef.current !== hls) return;
           hlsPlaybackReady = true;
@@ -2547,12 +2556,32 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
         });
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (!data.fatal || requestId !== qualityRequestRef.current || hlsRef.current !== hls) return;
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRecoveryAttempts < 1) {
+            networkRecoveryAttempts += 1;
+            hls.startLoad();
+            return;
+          }
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveryAttempts < 1) {
+            mediaRecoveryAttempts += 1;
+            hls.recoverMediaError();
+            return;
+          }
+          if (useCopyVideo) {
+            const fallbackAt = Math.max(resumeAt, (video.currentTime || 0) + streamOffsetRef.current);
+            hls.destroy();
+            hlsRef.current = null;
+            void changeQuality(nextQuality, fallbackAt, true, shouldPlayRef.current, bufferSizeOverride, audioStreamOverride, subtitleStreamOverride, false);
+            return;
+          }
           qualityBusyRef.current = true;
           setQualityBusy(true);
+          void stopActiveTranscode();
           hls.destroy();
           hlsRef.current = null;
           streamOffsetRef.current = 0;
           if (!directPlaybackCompatibleRef.current || audioTracks.length > 1 || selectedSubtitleStream !== null) {
+            shouldPlayRef.current = false;
+            setPlaying(false);
             qualityBusyRef.current = false;
             setQualityBusy(false);
             setPlaybackError(`${selectedQuality === "auto" ? "Automatic quality" : selectedQuality === "original-aac" ? "Original resolution" : `${streamQuality}p`} failed. Try another quality.`);
@@ -2851,7 +2880,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
   };
 
   useEffect(() => {
-    if (!details || details.offline || details.kind !== "video" || !nextQueueItem?.path || nextQueueItem.kind !== "video" || nextQueueItem.offline || !playing) return;
+    if (!details || details.offline || details.kind !== "video" || !nextQueueItem?.path || nextQueueItem.kind !== "video" || nextQueueItem.offline) return;
     const path = nextQueueItem.path;
     const currentPath = detailsMediaPath(details);
     const language = audioTracks.find((track) => track.stream_index === selectedAudioStream)?.language ?? audioLanguageRef.current;
@@ -2908,18 +2937,25 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
           if (canBufferQueueVideo(nextQueueItem)) setPreparedVideo({ slot: 1 - activeVideoSlot, src: nextQueueItem.src! });
           return;
         }
+        if (willStreamCopyVideo(info, videoRef.current, subtitle)) {
+          return;
+        }
         session = createTranscodeSessionId();
         nextPreloadRef.current = { path, session, quality: streamQuality, audio, subtitle, start };
-        preloadedFragmentsRef.current.clear();
         const query = new URLSearchParams({ video_path: path, quality: streamQuality, start: String(start), session, preload: "true" });
         if (canDirectPlayVideo(info, videoRef.current)) query.set("copy_video", "true");
         if (audio !== null) query.set("audio_stream", String(audio));
         if (subtitle !== null) query.set("subtitle_stream", String(subtitle));
         const response = await fetch(`${API_BASE}/api/transcode?${query}`, { signal });
+        if (response.status === 204) {
+          if (nextPreloadRef.current?.session === session) nextPreloadRef.current = null;
+          return;
+        }
         if (!response.ok) throw new Error("Next episode preload failed");
         const result = await response.json() as { url: string };
         const playlistUrl = new URL(`${API_BASE}${result.url}`, window.location.href).href;
         const playlist = await fetch(playlistUrl, { signal }).then((response) => response.text());
+        preloadedFragmentsRef.current.clear();
         for (const url of preloadSegments(playlist, playlistUrl)) {
           const fragment = await fetch(url, { signal });
           if (!fragment.ok) throw new Error("Next episode segment unavailable");
@@ -2945,7 +2981,7 @@ export default function WatchPage({ companionInstance, foregroundMedia = false }
       if (session && activeTranscodeSessionRef.current !== session) void cancelTranscodeSession(session);
       if (nextPreloadRef.current?.session === session) nextPreloadRef.current = null;
     };
-  }, [details?.src, details?.offline, nextQueueItem?.path, nextQueueItem?.kind, playing, quality, selectedAudioStream, burnedSubtitleStream, activeVideoSlot]);
+  }, [details?.src, details?.offline, nextQueueItem?.path, nextQueueItem?.kind, quality, selectedAudioStream, burnedSubtitleStream, activeVideoSlot]);
 
   const updateCaptionPreferences = (changes: Partial<CaptionPreferences>) => {
     const previous = playbackPreferences;
